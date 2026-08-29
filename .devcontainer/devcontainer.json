@@ -1,12 +1,12 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/ubuntu
 {
-	"name": "Ubuntu",
+	"name": "Ubuntu (Node.js LTS)",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/base:resolute",
+	"image": "mcr.microsoft.com/devcontainers/base:ubuntu",
 	"features": {
-		"ghcr.io/devcontainers-community/features/deno:1": {
-			"version": "latest"
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "lts"
 		}
 	},
 	"postCreateCommand": "curl -fsSL https://claude.ai/install.sh | bash"
