@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsc --build tsconfig.build.json",
     "build:clean": "tsc --build tsconfig.build.json --clean",
+    "watch": "tsc --build tsconfig.build.json --watch",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -26,6 +27,7 @@
     "test:integration": "vitest run --project integration",
     "test:agent": "vitest run --project agent",
     "test:e2e": "vitest run --project e2e",
+    "fixtures": "npm run build --silent && node fixtures/dist/serve.js",
     "setup:browsers": "playwright install --with-deps chromium",
     "verify": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm test"
   },

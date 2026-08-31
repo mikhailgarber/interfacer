@@ -43,10 +43,16 @@ npm run verify    # build -> typecheck -> lint -> format:check -> test
 There is no CI, by choice. `verify` is the whole gate, and it must be green before any
 work is presented as done.
 
-**Build before test.** Tests import `@interfacer/dsl` through the workspace symlink
-and the package's `exports` map into `dist/` — the same path a generated capability
-takes, which is the point. Running `vitest` directly against a stale build fails
-confusingly; `verify` orders it correctly.
+**Build before test.** Tests import `@interfacer/dsl` and `@interfacer/fixtures`
+through the workspace symlink and each package's `exports` map into `dist/` — the same
+path a generated capability takes, which is the point. Running `vitest` directly
+against a stale build fails confusingly; `verify` orders it correctly. `npm run watch`
+keeps `dist/` current while editing.
+
+The editor resolves through `dist/` too. An IDE diagnostic that `npm run lint` does not
+reproduce — typically "type that cannot be resolved" on a cross-package import — is a
+language server that cached a failed module resolution before the package was built.
+Rebuild, then restart the TypeScript and ESLint servers. Do not "fix" the code for it.
 
 ## tests
 

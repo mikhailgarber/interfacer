@@ -28,7 +28,7 @@ no model in the loop.
 | --- | --- |
 | `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, and the execution engine. The only runtime dependency a generated capability has. |
 | `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects. |
-| `fixtures` | Real HTTP applications served from the repo, differing in how hostile they are. Everything above the unit tier is proved against these rather than a public site. |
+| `fixtures` | Five real HTTP applications served from the repo — `clean`, `legacy`, `hostile`, `rebranded`, `skewed` — differing in how hostile they are. Everything above the unit tier is proved against these rather than a public site. `npm run fixtures` starts them for a person to look at. |
 | `e2e` | The live-model tier. Tests only. |
 
 Dependencies run one way. The DSL package knows nothing about Interfacer, the agent
@@ -37,11 +37,17 @@ an API key.
 
 ## status
 
-Phase 1 of the implementation plan. `@interfacer/dsl` carries the contract and the
-pure primitives — `Secret`, `fields()`/`Infer`, `Target`, the allowlist matcher, cost
-accounting, run-record entry construction, and the verification-order function. The
-`Flow` builder, the execution engine, the fixtures and the agent loop are not built
-yet.
+Phase 2 of the implementation plan.
+
+`@interfacer/dsl` carries the contract and the pure primitives — `Secret`,
+`fields()`/`Infer`, `Target`, the allowlist matcher, cost accounting, run-record entry
+construction, and the verification-order function.
+
+`fixtures` carries the five applications everything above the unit tier is proved
+against, each serving a login, a search, a detail screen and a multi-field action with
+a confirmation step, and each able to produce every exceptional condition on demand.
+
+The `Flow` builder, the execution engine and the agent loop are not built yet.
 
 ## working on it
 
@@ -49,6 +55,9 @@ yet.
 npm ci
 npm run setup:browsers    # Chromium, for the integration tier and above
 npm run verify            # build -> typecheck -> lint -> format:check -> test
+
+npm run fixtures          # start the fixture apps and print their URLs
+npm run watch             # keep dist/ current while editing (the editor reads it)
 ```
 
 `npm run verify` is the gate. See [docs/testing.md](docs/testing.md) for the tiers
