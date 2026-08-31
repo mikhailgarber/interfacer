@@ -32,7 +32,9 @@ default gate by accident.
 - **`integration`** — real browser, real fixture, no model. This is where the
   production path is proved: determinism, verification order, targeting and
   fallback drift, retry gating, allowlist enforcement, pauses and parked runs,
-  redaction. Tests author a `Flow` (see `packages/dsl/test/flows.ts`) and hand it
+  and the evidence rules — what `dataClasses` permits a run to capture, which
+  three triggers produce attachments, and a sentinel scan over everything the run
+  wrote. Tests author a `Flow` (see `packages/dsl/test/flows.ts`) and hand it
   to the engine. The resolvers the pause tests use are **fakes** — real functions
   answering the way a CLI's keyboard reader or a host's policy would, asserted on
   what the run produced rather than on how often they were called.
@@ -334,13 +336,6 @@ The runner config is the tier/location mapping and timeouts. These are real
 decisions that nothing has made yet, listed here so they are not mistaken for
 settled:
 
-- **Obtained values in a navigation URL** — a value from `.pauseForInput()` is a
-  `Secret`, so the pause that asked for it records the prompt and the bound and
-  never the answer. But typing it into a form that submits by GET puts it in the
-  next `navigation` entry's URL in clear, because that entry records the resolved
-  URL and has no idea where the query string came from. Whether the record masks
-  a URL, and on what basis, is the same question `dataClasses` asks about page
-  content. *(Phase 5)*
 - **Frame traversal** — `hostile` serves a help panel inside an `<iframe>`, and
   the design says nothing about whether the engine resolves a target across a
   document boundary. The frame is deliberately off the critical path, so every

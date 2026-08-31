@@ -42,6 +42,8 @@ describe('the envelope', () => {
       kind: 'run.started',
       inputNames: ['url'],
       secretInputNames: [],
+      dataClasses: ['non-identifying'],
+      effectsDeclared: false,
     });
 
     expect(Object.hasOwn(entry, 'stepId')).toBe(false);
@@ -111,6 +113,8 @@ describe('the envelope', () => {
       kind: 'run.started',
       inputNames: ['url', 'username'],
       secretInputNames: ['password'],
+      dataClasses: ['non-identifying'],
+      effectsDeclared: false,
       variant: {
         capability: 'checkAccountBalance',
         vendor: 'CoreBankingCo',
@@ -130,6 +134,8 @@ describe('what an entry may carry', () => {
       kind: 'run.started',
       inputNames: ['url', 'username', 'password'],
       secretInputNames: ['password'],
+      dataClasses: ['non-identifying'],
+      effectsDeclared: false,
     });
 
     // Structural, not filtered: there is no field on this entry that a value

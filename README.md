@@ -26,7 +26,7 @@ no model in the loop.
 
 | | what it is |
 | --- | --- |
-| `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, the execution engine, and the pause/resume machinery. The only runtime dependency a generated capability has. |
+| `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, the execution engine, pause/resume, and the evidence rules. The only runtime dependency a generated capability has. |
 | `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects. |
 | `fixtures` | Five real HTTP applications served from the repo — `clean`, `legacy`, `hostile`, `rebranded`, `skewed` — differing in how hostile they are. Everything above the unit tier is proved against these rather than a public site. `npm run fixtures` starts them for a person to look at. |
 | `e2e` | The live-model tier. Tests only. |
@@ -37,8 +37,9 @@ an API key.
 
 ## status
 
-Phase 4 of the implementation plan. **A capability can be replayed, and can stop to
-ask a human without losing its place.**
+Phase 5 of the implementation plan. **A capability can be replayed, can stop to ask a
+human without losing its place, and is bounded in what it may write down about what
+it saw.**
 
 `@interfacer/dsl` carries the contract and the pure primitives — `Secret`,
 `fields()`/`Infer`, `Target`, the allowlist matcher, cost accounting, run-record entry
@@ -63,8 +64,23 @@ one and it does.
 against, each serving a login, a search, a detail screen and a multi-field action with
 a confirmation step, and each able to produce every exceptional condition on demand.
 
-Not built yet: attachments and `dataClasses` (Phase 5), effect enforcement (Phase 6),
-the project generator (Phase 7), and the agent loop (Phase 8).
+And it carries the evidence rules. A capability declares `effects` — what it changes,
+whether that is reversible, and the `dataClasses` it observes — and `dataClasses`
+decides what a run may capture: a full screenshot and full markup for
+non-identifying data, a masked screenshot and a values-stripped DOM for PII, and no
+pixels at all for a full PAN or an SSN. Masking happens at capture time, so an
+unredacted artifact never exists. Recorded URLs are bounded the same way, because an
+application that puts a reference in a query string would otherwise write an observed
+value straight into the record. Attachments happen on three triggers only — a hard
+failure, a control transfer, and the `.commit()` — and only where a directory is
+configured; where none is, the record says it skipped. `effect.performed` names the
+declared dimension and links the `pause` that approved it, so *did anything
+irreversible happen, and was it authorized* is answered by reading the record. The
+record goes to stdout by default, or to stderr or a file — which is what an MCP entry
+point must select, since stdout there is the protocol transport.
+
+Not built yet: enforcement of the remaining `effects` dimensions (Phase 6), the
+project generator (Phase 7), and the agent loop (Phase 8).
 
 ## working on it
 

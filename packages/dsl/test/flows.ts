@@ -23,6 +23,7 @@ import {
   secret,
   text,
   type Duration,
+  type Effects,
   type Infer,
 } from '@interfacer/dsl';
 
@@ -75,6 +76,14 @@ export function parseMoney(rendered: string): number {
 
 export interface BalanceFlowOptions {
   /**
+   * What the capability declares it does.
+   *
+   * Omitted by most tests, because most are not about evidence — a flow that
+   * declares nothing is treated as `non-identifying`, and the record says it was
+   * defaulted rather than declared.
+   */
+  readonly effects?: Effects;
+  /**
    * Drop the declared detectors.
    *
    * Half of the pair that proves the verification order rather than assuming
@@ -86,7 +95,11 @@ export interface BalanceFlowOptions {
 
 /** Sign in, look an account up, read its balance. Read-only, so no `.commit()`. */
 export function balanceFlow(options: BalanceFlowOptions = {}) {
-  const start = new Flow({ id: 'checkAccountBalance', input: balanceInput })
+  const start = new Flow({
+    id: 'checkAccountBalance',
+    input: balanceInput,
+    ...(options.effects === undefined ? {} : { effects: options.effects }),
+  })
     .open((i) => i.url, { id: 'login.open' })
     .fillForm(USERNAME_FIELD, (i) => i.username, { id: 'login.username' })
     .fillForm(PASSWORD_FIELD, (i) => i.password, { id: 'login.password' })
@@ -136,8 +149,12 @@ export type TransferInput = Infer<typeof transferInput>;
  * reversible and the confirmation is not. A reader scanning this flow can see
  * exactly where it stops being reversible.
  */
-export function transferFlow() {
-  return new Flow({ id: 'transferFunds', input: transferInput })
+export function transferFlow(effects?: Effects) {
+  return new Flow({
+    id: 'transferFunds',
+    input: transferInput,
+    ...(effects === undefined ? {} : { effects }),
+  })
     .open((i) => i.url, { id: 'login.open' })
     .fillForm(USERNAME_FIELD, (i) => i.username, { id: 'login.username' })
     .fillForm(PASSWORD_FIELD, (i) => i.password, { id: 'login.password' })
@@ -190,6 +207,7 @@ export const attendedInput = fields({
 export type AttendedInput = Infer<typeof attendedInput>;
 
 export interface AttendedOptions {
+  readonly effects?: Effects;
   /**
    * The bound on the pauses a human answers.
    *
@@ -252,7 +270,11 @@ export function attendedBalanceFlow(options: AttendedOptions = {}) {
 export function approvedTransferFlow(options: AttendedOptions = {}) {
   const within = options.within ?? '5s';
 
-  return new Flow({ id: 'approvedTransfer', input: transferInput })
+  return new Flow({
+    id: 'approvedTransfer',
+    input: transferInput,
+    ...(options.effects === undefined ? {} : { effects: options.effects }),
+  })
     .open((i) => i.url, { id: 'login.open' })
     .fillForm(USERNAME_FIELD, (i) => i.username, { id: 'login.username' })
     .fillForm(PASSWORD_FIELD, (i) => i.password, { id: 'login.password' })

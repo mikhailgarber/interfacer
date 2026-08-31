@@ -6,10 +6,14 @@
  * is the only component a generated capability needs at run time, which is why a
  * capability in production never loads an SDK and never needs an API key.
  *
- * Phases 1, 3 and 4 land the contract, the pure primitives, the `Flow` builder,
- * the execution engine, the pause primitives and parked runs. Still to come:
+ * Phases 1, 3, 4 and 5 land the contract, the pure primitives, the `Flow`
+ * builder, the execution engine, pause and parked runs, and the evidence rules —
+ * record destinations, attachments on triggers, and what `dataClasses` permits
+ * either of them to carry.
  *
- * - **Phase 5** — record emission, attachments, and `dataClasses`.
+ * Still to come: replay-time enforcement of the remaining `effects` dimensions
+ * (Phase 6), and everything above the DSL — the generator, the agent loop and
+ * the CLI.
  */
 
 export { isSecret, makeSecret, REDACTED, type Secret } from './secret.js';
@@ -66,9 +70,37 @@ export {
 } from './cost.js';
 
 export {
+  capture,
+  type AttachmentKind,
+  type AttachmentRef,
+  type AttachmentTrigger,
+  type CaptureRequest,
+} from './attachments.js';
+
+export {
+  DEFAULT_EFFECTS,
+  evidencePolicyFor,
+  redactUrl,
+  STRUCTURAL_ATTRIBUTES,
+  VALUE_BEARING,
+  type DataClass,
+  type Effects,
+  type EvidencePolicy,
+  type External,
+  type Financial,
+  type Mutates,
+  type Reversible,
+  type Scope,
+  type SecurityEffect,
+} from './effects.js';
+
+export {
+  createEmitter,
   createEntryFactory,
+  DEFAULT_DESTINATION,
   type Entry,
   type EntryBody,
+  type EntryEvidence,
   type EntryFactory,
   type EntryFactoryOptions,
   type EntryKind,
@@ -76,6 +108,7 @@ export {
   type ErrorCategory,
   type PauseReason,
   type Phase,
+  type RecordDestination,
   type RunContext,
   type TerminalStatus,
   type VariantStamp,

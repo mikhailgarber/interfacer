@@ -23,6 +23,7 @@
    `AnswerOf`. `eslint --fix` applied this rule once and silently collapsed every
    answer union to its success arm. `flow.test-d.ts` is what catches it. */
 import type { HostPattern } from './allowlist.js';
+import { DEFAULT_EFFECTS, type Effects } from './effects.js';
 import type { FieldSet, Infer } from './fields.js';
 import {
   DEFAULT_INTERACTION_BOUND_MS,
@@ -188,6 +189,15 @@ export interface FlowOptions<I extends FieldSet> {
    * *else* the flow might be taken, which is the part a caller did not choose.
    */
   readonly allowlist?: readonly HostPattern[];
+  /**
+   * What this capability does, published in the contract.
+   *
+   * Optional here and required of a generated project: the interview asks and
+   * generation always emits one, so only a flow written by hand omits it. When
+   * it does, {@link DEFAULT_EFFECTS} applies and `run.started` records that it
+   * was defaulted rather than declared.
+   */
+  readonly effects?: Effects;
 }
 
 /**
@@ -277,6 +287,9 @@ export class Flow<
   readonly id: string;
   readonly input: I;
   readonly declaredAllowlist: readonly HostPattern[];
+  readonly effects: Effects;
+  /** Whether {@link effects} was declared or fell back to the default. */
+  readonly effectsDeclared: boolean;
 
   readonly #steps: Step[] = [];
   readonly #outcomes: OutcomeDeclaration[] = [];
@@ -288,6 +301,8 @@ export class Flow<
     this.id = options.id;
     this.input = options.input;
     this.declaredAllowlist = options.allowlist ?? [];
+    this.effects = options.effects ?? DEFAULT_EFFECTS;
+    this.effectsDeclared = options.effects !== undefined;
   }
 
   get steps(): readonly Step[] {

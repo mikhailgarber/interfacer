@@ -177,14 +177,22 @@ how-long / before-after.
 
 ## Phase 5 — Evidence completeness, attachments, dataClasses
 
-**Build:** full envelope on every entry (run id, capability id, version from
+**Build:** the `effects` value declaration — moved here from Phase 6, because
+`dataClasses` governs capture and `effect.performed` has to name a declared
+dimension, so evidence cannot be completed without it; Phase 6 keeps enforcement.
+Then: full envelope on every entry (run id, capability id, version from
 `package.json`, phase, step id, timestamp) + all kinds (`run.*`, `step.*`,
 `navigation`, `checkpoint`, `outcome.matched`, `retry`, `pause` / `resume`,
 `control.*`, `effect.performed`, `model.turn` [discovery only], `error`); attachments
 on triggers only — hard failure, control transfer, `.commit()`; `dataClasses` evidence
 matrix (non-identifying → full screenshot + DOM; PII → masked screenshot +
 structure-only DOM; full-PAN / SSN → structural only); masking at capture time via
-Playwright's mask (no unredacted buffer ever exists); `effect.performed` names the
+Playwright's mask (no unredacted buffer ever exists) — a capability declares
+`dataClasses` for itself and not per node, so PII masks the **value-bearing**
+elements and leaves label-bearing ones legible, which is what keeps "the balance
+field was present but empty" readable; `dataClasses` governs recorded **URLs** too,
+stripping query and fragment at PII and above while the allowlist goes on being
+judged on the real URL; `effect.performed` names the
 declared dimension and links the approving `pause` entry; record destination config —
 stdout default, **MCP → stderr or file, never stdout**, attachments need a configured
 directory else skipped + noted in the record.
@@ -197,14 +205,14 @@ the record; record never on stdout in MCP mode.
 
 ## Phase 6 — Effects & safety enforcement (replay side)
 
-**Build:** `effects` value declaration; replay-time enforcement — approval enforced
+**Build:** replay-time enforcement of the `effects` declaration Phase 5 landed —
+approval enforced
 before `.commit()`; `reversible: 'no'` requires an approval pause before the commit;
 `securityEffect !== 'none'` forces approval + attended (headless refused).
 Declarations published in the contract. (Generation-*time* rejections land in
 Phase 9 / 10 with the generator.)
 
-**Confirmed by:** unit tier for the static shape / inference helpers; integration tier
-— commit with no prior approval → hard failure; `reversible:no` flow missing its
+**Confirmed by (integration tier):** commit with no prior approval → hard failure; `reversible:no` flow missing its
 approval → rejected; `securityEffect` non-none → attended-only enforced.
 
 ## Phase 7 — Generated project emission

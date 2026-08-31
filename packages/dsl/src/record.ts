@@ -8,11 +8,17 @@
  * use for, but the format is one format, so a run that was recorded and a run
  * that replayed are read side by side.
  *
- * This module is entry *construction* only. Emission, destinations and
- * attachments are Phase 5.
+ * This module carries entry construction and where the finished entries go.
+ * What may be *in* them — attachments, and how `dataClasses` bounds them — lives
+ * in `effects.ts` and `attachments.ts`.
  */
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+
 import type { DenialReason, HostPattern } from './allowlist.js';
+import type { AttachmentRef } from './attachments.js';
 import type { Usage } from './cost.js';
+import type { DataClass } from './effects.js';
 import type { Strategy } from './target.js';
 
 export type Phase = 'discovery' | 'replay';
@@ -38,6 +44,19 @@ export interface Envelope extends RunContext {
   readonly timestamp: string;
   /** Absent on entries that are about the run rather than a step. */
   readonly stepId?: string;
+  /**
+   * Screenshots and DOM snapshots are attachments **on an entry**, not a second
+   * artifact — there is no separate trace to correlate against. Referenced by
+   * path rather than inlined, so the record stays a stream of one-line entries.
+   */
+  readonly attachments?: readonly AttachmentRef[];
+  /**
+   * Why a trigger produced no attachments.
+   *
+   * Present rather than absent, because rich capture that silently did not
+   * happen leaves a reader believing they are looking at everything there was.
+   */
+  readonly attachmentsSkipped?: string;
 }
 
 /**
@@ -83,6 +102,14 @@ export type EntryBody =
       readonly inputNames: readonly string[];
       readonly secretInputNames: readonly string[];
       readonly variant?: VariantStamp;
+      /**
+       * What the capability declared it observes, and whether it declared at
+       * all. A capability that declares nothing is treated permissively, so the
+       * absence has to be visible — otherwise a reader cannot tell a considered
+       * `non-identifying` from a forgotten declaration.
+       */
+      readonly dataClasses: readonly DataClass[];
+      readonly effectsDeclared: boolean;
     }
   | { readonly kind: 'run.finished'; readonly status: TerminalStatus }
   | { readonly kind: 'step.started'; readonly verb: string }
@@ -179,11 +206,17 @@ export interface EntryFactoryOptions {
  * instrumentation point, so evidence is uniform across every capability, cannot
  * be forgotten, and stays consistent between discovery and replay.
  */
+/** The envelope fields a trigger contributes. Never part of the body. */
+export interface EntryEvidence {
+  readonly attachments?: readonly AttachmentRef[];
+  readonly attachmentsSkipped?: string;
+}
+
 export interface EntryFactory {
   /** The `seq` the next entry will carry. */
   readonly nextSeq: number;
   /** Stamp an envelope onto a body. `stepId` is omitted where it does not apply. */
-  entry(body: EntryBody, stepId?: string): Entry;
+  entry(body: EntryBody, stepId?: string, evidence?: EntryEvidence): Entry;
 }
 
 export function createEntryFactory(
@@ -198,7 +231,7 @@ export function createEntryFactory(
       return seq;
     },
 
-    entry(body: EntryBody, stepId?: string): Entry {
+    entry(body: EntryBody, stepId?: string, evidence: EntryEvidence = {}): Entry {
       const envelope: Envelope = {
         runId: context.runId,
         capabilityId: context.capabilityId,
@@ -207,9 +240,49 @@ export function createEntryFactory(
         seq: seq++,
         timestamp: now().toISOString(),
         ...(stepId === undefined ? {} : { stepId }),
+        ...(evidence.attachments === undefined ? {} : { attachments: evidence.attachments }),
+        ...(evidence.attachmentsSkipped === undefined
+          ? {}
+          : { attachmentsSkipped: evidence.attachmentsSkipped }),
       };
 
       return Object.freeze({ ...envelope, ...body });
     },
+  };
+}
+
+/**
+ * Where the record goes.
+ *
+ * The record is a log and is configured like one: one JSON object per line, to
+ * **stdout by default**, so a run is pipeable and needs no path convention at
+ * all.
+ *
+ * One case is not a preference but a constraint. An MCP server's stdout is the
+ * protocol transport, so the record must never go there — `'stderr'` or a file
+ * is what an MCP entry point selects, and writing entries onto the transport
+ * would corrupt the protocol rather than merely being untidy.
+ */
+export type RecordDestination = 'stdout' | 'stderr' | { readonly file: string };
+
+export const DEFAULT_DESTINATION: RecordDestination = 'stdout';
+
+/** One JSON object per line, to wherever the destination names. */
+export function createEmitter(destination: RecordDestination): (entry: Entry) => void {
+  if (destination === 'stdout') {
+    return (entry) => void process.stdout.write(`${JSON.stringify(entry)}\n`);
+  }
+
+  if (destination === 'stderr') {
+    return (entry) => void process.stderr.write(`${JSON.stringify(entry)}\n`);
+  }
+
+  const { file } = destination;
+  mkdirSync(dirname(file), { recursive: true });
+  // Appended synchronously: the record is an append-only log whose ordering is
+  // the point, and a stream would need an open/close lifecycle the engine does
+  // not own — a run that throws must still leave the entries it had written.
+  return (entry) => {
+    appendFileSync(file, `${JSON.stringify(entry)}\n`);
   };
 }

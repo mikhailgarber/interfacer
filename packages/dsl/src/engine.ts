@@ -18,9 +18,18 @@
  * record**. The DSL primitives are the only place the engine is instrumented, so
  * evidence is uniform across every capability and cannot be forgotten.
  */
-import { chromium, type Browser, type BrowserContext, type Request, type Route } from 'playwright';
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+  type Request,
+  type Route,
+} from 'playwright';
 
 import { checkAllowlist, type HostPattern } from './allowlist.js';
+import { capture, type AttachmentTrigger } from './attachments.js';
+import { evidencePolicyFor, redactUrl } from './effects.js';
 import {
   ApprovalDenied,
   CheckpointFailed,
@@ -44,11 +53,15 @@ import {
   type Suspended,
 } from './pause.js';
 import {
+  createEmitter,
   createEntryFactory,
+  DEFAULT_DESTINATION,
   type Entry,
   type EntryBody,
+  type EntryEvidence,
   type PauseReason,
   type Phase,
+  type RecordDestination,
 } from './record.js';
 import { isDrift, resolveTarget, type Resolution } from './resolve.js';
 import type { Secret } from './secret.js';
@@ -64,8 +77,24 @@ export interface RunOptions {
    * declares.
    */
   readonly allowlist?: readonly HostPattern[];
-  /** Where the run record goes. Defaults to one JSON object per line on stdout. */
+  /** Take the entries directly. Overrides {@link destination}; a test's way in. */
   readonly record?: (entry: Entry) => void;
+  /**
+   * Where the run record goes. One JSON object per line on stdout by default.
+   *
+   * An MCP entry point must select `'stderr'` or a file: stdout is the protocol
+   * transport there, and entries written onto it corrupt the protocol.
+   */
+  readonly destination?: RecordDestination;
+  /**
+   * Where attachments are written. Absent means none are.
+   *
+   * Rich capture is opt-in because a screenshot cannot go to a stream and has to
+   * land somewhere somebody chose — which also suits the data-handling story.
+   * Where no directory is configured a trigger records that it skipped, rather
+   * than silently producing less than the reader expects.
+   */
+  readonly attachmentDir?: string;
   readonly runId?: string;
   readonly capabilityVersion?: string;
   readonly phase?: Phase;
@@ -190,9 +219,10 @@ export function runFlow<I extends FieldSet, A>(
   async function execute(): Promise<A> {
     const runId =
       options.runId ?? `run_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-    const emit =
-      options.record ??
-      ((entry: Entry): void => void process.stdout.write(`${JSON.stringify(entry)}\n`));
+    const emit = options.record ?? createEmitter(options.destination ?? DEFAULT_DESTINATION);
+    // What `dataClasses` permits this run to capture. Computed once: it is a
+    // property of the capability, not a judgement made fresh on each page.
+    const policy = evidencePolicyFor(flow.effects.dataClasses);
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const retries = options.retries ?? DEFAULT_RETRIES;
     const clock = options.now ?? ((): Date => new Date());
@@ -208,10 +238,55 @@ export function runFlow<I extends FieldSet, A>(
       options.now === undefined ? {} : { now: options.now },
     );
 
-    const record = (body: EntryBody, stepId?: string): Entry => {
-      const entry = entries.entry(body, stepId);
+    const record = (body: EntryBody, stepId?: string, evidence?: EntryEvidence): Entry => {
+      const entry = entries.entry(body, stepId, evidence);
       emit(entry);
       return entry;
+    };
+
+    /**
+     * Record an entry that a trigger hangs attachments off.
+     *
+     * The three triggers are the only moments rich capture happens: a hard
+     * failure, a control transfer, and the `.commit()` step. Capture runs
+     * *before* the entry is stamped, so the files can be named for the `seq`
+     * the entry is about to carry and the reference is right the first time.
+     */
+    const recordWithCapture = async (
+      body: EntryBody,
+      stepId: string | undefined,
+      trigger: AttachmentTrigger,
+      page: Page | undefined,
+    ): Promise<Entry> => {
+      const seq = entries.nextSeq;
+
+      if (page === undefined) {
+        return record(body, stepId);
+      }
+
+      if (options.attachmentDir === undefined) {
+        return record(body, stepId, {
+          attachmentsSkipped: 'no attachment directory is configured',
+        });
+      }
+
+      try {
+        const attachments = await capture({
+          page,
+          dir: options.attachmentDir,
+          runId,
+          seq,
+          trigger,
+          policy,
+        });
+        return record(body, stepId, { attachments });
+      } catch (error) {
+        // A capture that fails must not turn a diagnosable failure into an
+        // undiagnosable one, so it is noted and the entry still goes out.
+        return record(body, stepId, {
+          attachmentsSkipped: error instanceof Error ? error.message : 'capture failed',
+        });
+      }
     };
 
     browser ??= await chromium.launch({ headless: options.headless ?? true });
@@ -232,6 +307,14 @@ export function runFlow<I extends FieldSet, A>(
      * continuing rather than driving blind into whatever is on screen.
      */
     let lastCheckpoint: { id: string; target: TargetChain } | undefined;
+    /**
+     * The `seq` of the `pause` entry that most recently approved something.
+     *
+     * `null` where none has. An `effect.performed` carrying `null` is exactly how
+     * a missing approval shows up in the record: present and unlinked, rather
+     * than absent and unnoticed.
+     */
+    let approvedBySeq: number | null = null;
 
     try {
       context = await openBrowser.newContext();
@@ -251,7 +334,10 @@ export function runFlow<I extends FieldSet, A>(
         const decision = checkAllowlist(request.url(), [...allowed]);
         record({
           kind: 'navigation',
-          url: request.url(),
+          // Judged on the real URL, recorded through `dataClasses`: an
+          // application that puts a reference in a query string would otherwise
+          // write a value the caller supplied straight into the record.
+          url: redactUrl(request.url(), policy),
           allowed: decision.allowed,
           ...(decision.allowed ? { pattern: decision.pattern } : { reason: decision.reason }),
         });
@@ -283,6 +369,8 @@ export function runFlow<I extends FieldSet, A>(
         secretInputNames: Object.entries(flow.input)
           .filter(([, field]) => field.kind === 'secret')
           .map(([name]) => name),
+        dataClasses: flow.effects.dataClasses,
+        effectsDeclared: flow.effectsDeclared,
       });
 
       const extracted: Record<string, unknown> = {};
@@ -378,30 +466,21 @@ export function runFlow<I extends FieldSet, A>(
               break;
           }
 
-          record(
-            {
-              kind: 'error',
-              category: 'hard-failure',
-              expected: failure.expected,
-              observed: failure.observed,
-            },
-            step.id,
-          );
-          record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
-
           throw blocked === undefined
-            ? new CheckpointFailed(`${step.id}: ${failure.observed}`, {
-                runId,
-                step: step.id,
-                expected: failure.expected,
-                observed: failure.observed,
-              })
-            : new NavigationBlocked(`${step.id}: navigation left the allowlist`, {
-                runId,
-                step: step.id,
-                expected: `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
-                observed: `${blocked.url} (${blocked.reason})`,
-              });
+            ? await hardFailure(
+                CheckpointFailed,
+                step.id,
+                `${step.id}: ${failure.observed}`,
+                failure.expected,
+                failure.observed,
+              )
+            : await hardFailure(
+                NavigationBlocked,
+                step.id,
+                `${step.id}: navigation left the allowlist`,
+                `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
+                `${redactUrl(blocked.url, policy)} (${blocked.reason})`,
+              );
         }
       }
 
@@ -472,27 +551,12 @@ export function runFlow<I extends FieldSet, A>(
 
         if (!resolution.found) {
           if (resolution.reason === 'ambiguous') {
-            record(
-              {
-                kind: 'error',
-                category: 'hard-failure',
-                expected: 'exactly one element',
-                observed: `${String(resolution.matches)} matched ${resolution.strategy}`,
-              },
+            throw await hardFailure(
+              TargetAmbiguous,
               step.id,
-            );
-            record({
-              kind: 'run.finished',
-              status: { ending: 'failure', category: 'hard-failure' },
-            });
-            throw new TargetAmbiguous(
               `${step.id}: ${String(resolution.matches)} elements matched`,
-              {
-                runId,
-                step: step.id,
-                expected: `exactly one element for ${describeChain(chain)}`,
-                observed: `${String(resolution.matches)} elements matched strategy "${resolution.strategy}"`,
-              },
+              `exactly one element for ${describeChain(chain)}`,
+              `${String(resolution.matches)} elements matched strategy "${resolution.strategy}"`,
             );
           }
           return {
@@ -525,10 +589,30 @@ export function runFlow<I extends FieldSet, A>(
             }
 
             case 'pressButton':
+              await resolution.locator.click({ timeout: timeoutMs });
+              await settle();
+              enforceResolvedUrl(step.id);
+              break;
+
             case 'commit':
               await resolution.locator.click({ timeout: timeoutMs });
               await settle();
               enforceResolvedUrl(step.id);
+              // Someone auditing a run should be able to answer *did anything
+              // irreversible happen, and was it authorized* by reading the
+              // record, not by inferring it from a `step.finished` on a button
+              // press. This is the entry that answers it.
+              await recordWithCapture(
+                {
+                  kind: 'effect.performed',
+                  dimension: 'reversible',
+                  value: flow.effects.reversible,
+                  approvedBySeq,
+                },
+                step.id,
+                'commit',
+                page,
+              );
               break;
 
             case 'choose': {
@@ -589,19 +673,22 @@ export function runFlow<I extends FieldSet, A>(
         try {
           allowed.add(new URL(url).hostname);
         } catch {
-          return { expected: 'a URL', observed: url };
+          return { expected: 'a URL', observed: redactUrl(url, policy) };
         }
 
         try {
           await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs * 3 });
         } catch (error) {
           if (blocked !== undefined) {
-            return { expected: 'a navigation within the allowlist', observed: blocked.url };
+            return {
+              expected: 'a navigation within the allowlist',
+              observed: redactUrl(blocked.url, policy),
+            };
           }
-          throw new SurfaceUnavailable(`${stepId}: could not reach ${url}`, {
+          throw new SurfaceUnavailable(`${stepId}: could not reach ${redactUrl(url, policy)}`, {
             runId,
             step: stepId,
-            expected: `a page at ${url}`,
+            expected: `a page at ${redactUrl(url, policy)}`,
             observed:
               error instanceof Error
                 ? (error.message.split('\n')[0] ?? 'unreachable')
@@ -644,12 +731,14 @@ export function runFlow<I extends FieldSet, A>(
           return;
         }
 
+        const recorded = redactUrl(current, policy);
+
         record(
           {
             kind: 'error',
             category: 'hard-failure',
             expected: `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
-            observed: current,
+            observed: recorded,
           },
           stepId,
         );
@@ -659,7 +748,7 @@ export function runFlow<I extends FieldSet, A>(
           runId,
           step: stepId,
           expected: `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
-          observed: `${current} (${decision.reason})`,
+          observed: `${recorded} (${decision.reason})`,
         });
       }
 
@@ -734,15 +823,23 @@ export function runFlow<I extends FieldSet, A>(
         };
 
         const holder = resolver === undefined ? 'caller' : 'resolver';
-        record({ kind: 'pause', reason, name: step.name, declared: true, expiresAt }, step.id);
-        record({ kind: 'control.transferred', holder, stateBefore: where() }, step.id);
+        const pauseEntry = record(
+          { kind: 'pause', reason, name: step.name, declared: true, expiresAt },
+          step.id,
+        );
+        await recordWithCapture(
+          { kind: 'control.transferred', holder, stateBefore: where() },
+          step.id,
+          'control-transfer',
+          page,
+        );
 
         const response = await obtainResponse(step, request);
         const heldMs = Date.now() - startedAt;
 
         const check = checkResponse(step.pauseKind, response);
         if (!check.ok) {
-          throw hardFailure(
+          throw await hardFailure(
             InteractionFailed,
             step.id,
             `${step.id}: a ${step.pauseKind} answered with the wrong kind of value`,
@@ -751,7 +848,12 @@ export function runFlow<I extends FieldSet, A>(
           );
         }
 
-        record({ kind: 'control.returned', holder, heldMs, stateAfter: where() }, step.id);
+        await recordWithCapture(
+          { kind: 'control.returned', holder, heldMs, stateAfter: where() },
+          step.id,
+          'control-transfer',
+          page,
+        );
         record({ kind: 'resume', reason, resolvedBy: holder, waitedMs: heldMs }, step.id);
 
         switch (step.pauseKind) {
@@ -760,8 +862,15 @@ export function runFlow<I extends FieldSet, A>(
             break;
 
           case 'approval':
-            if (response !== true) {
-              throw hardFailure(
+            if (response === true) {
+              // The `seq` an `effect.performed` will point at. Linking them is
+              // what turns the effects declaration from a claim in the contract
+              // into something observable after the fact.
+              approvedBySeq = pauseEntry.seq;
+              break;
+            }
+            {
+              throw await hardFailure(
                 ApprovalDenied,
                 step.id,
                 `${step.id}: approval refused`,
@@ -789,12 +898,12 @@ export function runFlow<I extends FieldSet, A>(
             : await withBound(resolver(request), step.withinMs);
         } catch (error) {
           if (error instanceof PauseTimeout) {
-            throw expiry(step, error);
+            throw await expiry(step, error);
           }
           // A resolver that throws has failed to answer, which is not the same as
           // declining: it is a bug in the caller's policy, and treating it as a
           // deny would silently pick one of the two answers it failed to give.
-          throw hardFailure(
+          throw await hardFailure(
             InteractionFailed,
             step.id,
             `${step.id}: the resolver threw`,
@@ -812,7 +921,10 @@ export function runFlow<I extends FieldSet, A>(
        * a plain expiry. Either way it is a hard failure with evidence rather than a
        * hang, which is what "every pause is bounded" buys.
        */
-      function expiry(step: PauseStep & { kind: 'pause' }, timeout: PauseTimeout): ReplayError {
+      async function expiry(
+        step: PauseStep & { kind: 'pause' },
+        timeout: PauseTimeout,
+      ): Promise<ReplayError> {
         const observed =
           timeout.expiredBy === 'ttl'
             ? `nobody resumed the parked run within its TTL (${String(timeout.waitedMs)}ms)`
@@ -846,7 +958,7 @@ export function runFlow<I extends FieldSet, A>(
         const resolution = await resolveTarget(page, checkpoint.target, 'present', timeoutMs);
         if (!resolution.found) {
           record({ kind: 'checkpoint', satisfied: false }, checkpoint.id);
-          throw hardFailure(
+          throw await hardFailure(
             CheckpointFailed,
             stepId,
             `${stepId}: the session did not come back where it was left`,
@@ -861,22 +973,34 @@ export function runFlow<I extends FieldSet, A>(
       /** Where the browser is, for control-transfer evidence. */
       function where(): string {
         try {
-          return page.url();
+          return redactUrl(page.url(), policy);
         } catch {
           // The context is gone — a TTL killed it. Its absence is the evidence.
           return '(session closed)';
         }
       }
 
-      /** Record the verdict and build the error, so the two cannot disagree. */
-      function hardFailure(
+      /**
+       * Record the verdict and build the error, so the two cannot disagree.
+       *
+       * Every hard failure comes through here, which is what makes "attachments
+       * on triggers only" a property rather than a convention — there is one
+       * place a failure is written, so there is one place capture can happen and
+       * one place it can be forgotten.
+       */
+      async function hardFailure(
         Class: new (message: string, detail: ReplayErrorDetail) => ReplayError,
         stepId: string,
         message: string,
         expected: string,
         observed: string,
-      ): ReplayError {
-        record({ kind: 'error', category: 'hard-failure', expected, observed }, stepId);
+      ): Promise<ReplayError> {
+        await recordWithCapture(
+          { kind: 'error', category: 'hard-failure', expected, observed },
+          stepId,
+          'hard-failure',
+          page,
+        );
         record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
         return new Class(message, { runId, step: stepId, expected, observed });
       }
