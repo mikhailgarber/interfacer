@@ -10,6 +10,7 @@ import {
   text,
   type AnswerOf,
   type InputOf,
+  type Step,
 } from '@interfacer/dsl';
 
 /**
@@ -145,3 +146,41 @@ const paused = new Flow({ id: 'paused', input: inputFields })
   .returns(() => ({ status: 'ok' as const }));
 
 expectTypeOf<AnswerOf<typeof paused>>().toEqualTypeOf<{ status: 'ok' }>();
+
+/**
+ * The vocabulary is closed, and the compiler is what closes it.
+ *
+ * `flow.unit.test.ts` asserts that exercising every verb reaches every kind and
+ * that no other method appends a step; this asserts the other direction, which
+ * only the type system can — that the union itself admits nothing more. A
+ * twelfth verb fails here before it has a test, a doc line, or an engine branch.
+ */
+// @covers artifact.closed-vocabulary
+expectTypeOf<Step['kind']>().toEqualTypeOf<
+  | 'open'
+  | 'fillForm'
+  | 'pressButton'
+  | 'commit'
+  | 'choose'
+  | 'checkpoint'
+  | 'extract'
+  | 'pauseUntil'
+  | 'pause'
+  | 'optional'
+  | 'oneOf'
+>();
+
+/**
+ * A branch point is a target, never a predicate.
+ *
+ * `.optional(page => page.hasDialog())` would be general branching: the step list
+ * would become a function of the run rather than a property of the artifact, and
+ * the replay allowlist could no longer be computed from the flow.
+ */
+// @covers dsl.no-general-branching
+expectTypeOf<Extract<Step, { kind: 'optional' }>['target']>().toEqualTypeOf<
+  import('@interfacer/dsl').TargetChain
+>();
+expectTypeOf<Extract<Step, { kind: 'oneOf' }>['arms'][number]['when']>().toEqualTypeOf<
+  import('@interfacer/dsl').TargetChain
+>();
