@@ -1,0 +1,12 @@
+{
+  // The build solution. `tsc --build` walks these references in dependency
+  // order, which is what makes the design's one-way dependency graph a compiler
+  // rule rather than a convention: `interfacer` references `@interfacer/dsl`,
+  // and nothing references `interfacer`.
+  "files": [],
+  "references": [
+    { "path": "./packages/dsl/tsconfig.build.json" },
+    { "path": "./packages/interfacer/tsconfig.build.json" },
+    { "path": "./fixtures/tsconfig.build.json" }
+  ]
+}

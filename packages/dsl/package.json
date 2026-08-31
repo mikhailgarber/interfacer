@@ -1,0 +1,24 @@
+{
+  "name": "@interfacer/dsl",
+  "version": "0.0.0",
+  "description": "Step vocabulary, Target, contract declarations, Secret, and the execution engine. The only runtime dependency a generated capability has.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.11"
+  },
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}

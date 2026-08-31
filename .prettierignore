@@ -1,0 +1,15 @@
+node_modules/
+**/dist/
+coverage/
+package-lock.json
+LICENSE
+
+# Prose is written for reading, not for a formatter. Reformatting the design doc
+# would bury a real edit in reflow noise.
+docs/
+README.md
+CLAUDE.md
+
+# Pre-existing config this repo did not author.
+.devcontainer/
+.github/dependabot.yml

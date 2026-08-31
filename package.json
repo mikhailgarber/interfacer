@@ -1,0 +1,42 @@
+{
+  "name": "interfacer-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Monorepo for @interfacer/dsl, the interfacer CLI, and the test fixtures they are proved against.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.11"
+  },
+  "workspaces": [
+    "packages/*",
+    "fixtures",
+    "e2e"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "build:clean": "tsc --build tsconfig.build.json --clean",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run --project unit --project fixtures --project integration",
+    "test:unit": "vitest run --project unit",
+    "test:fixtures": "vitest run --project fixtures",
+    "test:integration": "vitest run --project integration",
+    "test:agent": "vitest run --project agent",
+    "test:e2e": "vitest run --project e2e",
+    "setup:browsers": "playwright install --with-deps chromium",
+    "verify": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.4.0",
+    "eslint": "^10.9.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.68.0",
+    "vitest": "^4.1.11"
+  }
+}

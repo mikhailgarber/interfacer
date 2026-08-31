@@ -1,0 +1,28 @@
+{
+  "name": "interfacer",
+  "version": "0.0.0",
+  "description": "The CLI and agent: interview, agent loop, generation. It writes capability projects.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "interfacer": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.11"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
+    "@interfacer/dsl": "0.0.0"
+  }
+}

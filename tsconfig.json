@@ -1,0 +1,28 @@
+{
+  // The "everything" config: every source and test file in the repo, no emit.
+  //
+  // This is what editors, ESLint's project service, and Vitest's typecheck tier
+  // resolve to, because it is the nearest `tsconfig.json` to every file. The
+  // packages deliberately have no `tsconfig.json` of their own — their build
+  // configs are named `tsconfig.build.json` — so there is exactly one answer to
+  // "which project is this file in".
+  //
+  // `npm run build` uses ./tsconfig.build.json instead.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "test/**/*.ts",
+    "packages/*/src/**/*.ts",
+    "packages/*/test/**/*.ts",
+    "fixtures/src/**/*.ts",
+    "fixtures/test/**/*.ts",
+    "e2e/test/**/*.ts",
+    "*.config.ts"
+  ]
+}
