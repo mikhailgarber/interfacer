@@ -10,9 +10,11 @@ Discovery is expensive, non-deterministic, and supervised; it runs once. Replay 
 
 Three positions shape what follows:
 
-* **The artifact is a program, not a document.** Steps are expressed in a small TypeScript DSL, so the recorded flow reads as a description of itself. Its contract is expressed in types, so the compiler checks it and every other representation — CLI parser, MCP schema, docs — is projected from it.
-* **The ways a task can end are part of that contract.** "No such account" is an answer, not a crash; only genuine breakage is thrown.
-* **Guardrails are authored by a human, not resolved by the model.** A model that settles its own constraints has not been constrained.
+* **The artifact is a program, not a document.** Steps are expressed in a small TypeScript DSL, so the recorded flow reads as a description of itself. Its contract is expressed in types, so the compiler checks it and every other representation — CLI parser, MCP schema, docs — is projected from it.<sup>[c](testing.md#design-claim-coverage "claim: position.contract-in-types — phase 1")</sup>
+* **The ways a task can end are part of that contract.** "No such account" is an answer, not a crash; only genuine breakage is thrown.<sup>[c](testing.md#design-claim-coverage "claim: position.outcomes-are-contract — phase 3")</sup>
+* **Guardrails are authored by a human, not resolved by the model.** A model that settles its own constraints has not been constrained.<sup>[c](testing.md#design-claim-coverage "claim: position.guardrails-human-authored — phase 9")</sup>
+
+A statement carrying a <sup>c</sup> makes a claim the test suite is expected to hold it to. The marker names a claim id and the build phase that should prove it — hover it to see both — and `npm run claims` reports which claims the suite actually verifies and which it does not. Adding a statement of that kind means adding a marker; see [testing.md](testing.md#design-claim-coverage) for what earns one.
 
 ## scope
 
@@ -20,7 +22,7 @@ Interfacer drives **web applications**, using Playwright. That is the only surfa
 
 Web applications differ in how tractable they are — a modern app with semantic markup and test IDs, or a server-rendered page of nested tables with neither — but that is a question of which targeting strategy identifies a control reliably, not of architecture. Both are the same surface driven the same way, and the recorded flow does not distinguish them.
 
-The surfaces that *are* architecturally different — desktop applications, anything reached through an OS accessibility API rather than a DOM — are deliberately deferred. What keeps them reachable is a single decision: an element target is a structured value that names its own strategy, never an opaque selector string. A recorded flow therefore says "the control identified this way," and introducing a strategy that resolves against a desktop accessibility tree is purely additive — existing artifacts keep their meaning and none needs rewriting.
+The surfaces that *are* architecturally different — desktop applications, anything reached through an OS accessibility API rather than a DOM — are deliberately deferred. What keeps them reachable is a single decision: an element target is a structured value that names its own strategy, never an opaque selector string.<sup>[c](testing.md#design-claim-coverage "claim: scope.target-names-own-strategy — phase 1")</sup> A recorded flow therefore says "the control identified this way," and introducing a strategy that resolves against a desktop accessibility tree is purely additive — existing artifacts keep their meaning and none needs rewriting.
 
 That is the whole abstraction. There is no `Driver` interface, no surface registry, no plugin mechanism. A second driver is a mechanical refactor once a second surface actually exists; building the indirection beforehand would be speculative, and a layer that has never had a second implementation is not a proven seam anyway. The browser assumptions above are accepted as such rather than hidden.
 
@@ -32,17 +34,17 @@ Captured process needs to be expressed in a form suitable for:
 * modification
 * subsequent repeated execution without LLM present
 
-The perfect design for that is simply code. Therefore, Interfacer produces a complete Node/TypeScript software project at a given location. Once that project is built, this particular interface can be exercised by executing the project's entry point.
+The perfect design for that is simply code. Therefore, Interfacer produces a complete Node/TypeScript software project at a given location. Once that project is built, this particular interface can be exercised by executing the project's entry point.<sup>[c](testing.md#design-claim-coverage "claim: artifact.is-a-buildable-project — phase 7")</sup>
 
 Because the artifact is a program, its contract is the code (see "master function contract" below). Inputs, outputs, and the declared business outcomes are declared once, in a form that carries its own schema information as ordinary property values and from which the TypeScript types are inferred. The compiler checks the types; the CLI argument parser, the MCP tool schema, and the generated documentation all read that same declaration at run time. There is no second representation to keep in step — changing a field changes the type, the served tool schema, and the accepted command line together.
 
 Arbitrary code would be too much freedom: it can do anything, which makes it neither reviewable at a glance nor analyzable as data. So the steps are not arbitrary TypeScript. They are calls into a small DSL with a fixed vocabulary — open a page, fill a field, press a control, wait on a condition, pause for a human, assert a checkpoint, declare an outcome, extract a value. The vocabulary is narrow enough that a reviewer reads a flow top to bottom without tracing control flow, and closed enough that what a capability can do is bounded by what the DSL offers, while remaining ordinary TypeScript that the compiler checks and an editor completes.
 
-The step sequence is not executed eagerly. DSL calls accumulate into an in-memory flow object carrying an explicit capability `id`, which the engine then walks. Nothing is serialized out of that object: there is no manifest, no step file, no exported description. The source is the artifact, and the source is what a human or an LLM reviews and diffs — a normalized data form would only be a second copy of the same facts, free to drift from the code it claims to describe.
+The step sequence is not executed eagerly. DSL calls accumulate into an in-memory flow object carrying an explicit capability `id`, which the engine then walks.<sup>[c](testing.md#design-claim-coverage "claim: artifact.steps-accumulate-not-execute — phase 3")</sup> Nothing is serialized out of that object: there is no manifest, no step file, no exported description.<sup>[c](testing.md#design-claim-coverage "claim: artifact.no-serialized-form — phase 7")</sup> The source is the artifact, and the source is what a human or an LLM reviews and diffs — a normalized data form would only be a second copy of the same facts, free to drift from the code it claims to describe.
 
-Every DSL call carries a stable step id, so errors and evidence refer to `login.submit` rather than to a position that shifts whenever the flow is edited.
+Every DSL call carries a stable step id, so errors and evidence refer to `login.submit` rather than to a position that shifts whenever the flow is edited.<sup>[c](testing.md#design-claim-coverage "claim: artifact.stable-step-ids — phase 3")</sup>
 
-Versioning is the project's own. One project is one capability, so the capability's version is the `package.json` version and its history is the repository's — the flow declares no version of its own, because a hand-maintained number beside a real one only drifts from it.
+Versioning is the project's own. One project is one capability, so the capability's version is the `package.json` version and its history is the repository's — the flow declares no version of its own, because a hand-maintained number beside a real one only drifts from it.<sup>[c](testing.md#design-claim-coverage "claim: artifact.version-is-the-project — phase 7")</sup>
 
 ## components
 
@@ -60,9 +62,9 @@ Three things are built:
 | `interfacer` | the CLI and agent — interview, agent loop, generation; it writes projects | `@interfacer/dsl`, Claude SDK |
 | a generated project | the capability itself: flow, contract, master function, CLI entry point, MCP server | `@interfacer/dsl` |
 
-Dependencies run one way. The DSL library knows nothing about Interfacer, the agent loop, or any model, and it is the only component a generated project needs at run time — so a capability in production never loads an SDK and never needs an API key. Interfacer depends on the DSL library as an ordinary consumer, on the same terms as the projects it writes.
+Dependencies run one way. The DSL library knows nothing about Interfacer, the agent loop, or any model,<sup>[c](testing.md#design-claim-coverage "claim: components.one-way-dependencies — phase 0")</sup> and it is the only component a generated project needs at run time — so a capability in production never loads an SDK and never needs an API key.<sup>[c](testing.md#design-claim-coverage "claim: components.no-sdk-at-replay — phase 7")</sup> Interfacer depends on the DSL library as an ordinary consumer, on the same terms as the projects it writes.
 
-There is **one execution engine with two callers**. Replay is the engine walking a finished flow. Discovery is the same engine walking a flow the model is still appending to: the agent proposes a step, the engine executes it against the live session, and what the engine observes becomes the model's next input. Discovery is not a different way of executing, only a different way of deciding what to execute next — which is what makes "it worked during discovery" a claim about replay rather than about a prototype.
+There is **one execution engine with two callers**. Replay is the engine walking a finished flow. Discovery is the same engine walking a flow the model is still appending to: the agent proposes a step, the engine executes it against the live session, and what the engine observes becomes the model's next input. Discovery is not a different way of executing, only a different way of deciding what to execute next<sup>[c](testing.md#design-claim-coverage "claim: components.one-engine-two-callers — phase 8")</sup> — which is what makes "it worked during discovery" a claim about replay rather than about a prototype.
 
 The phases differ in what surrounds the engine, not in the engine:
 
@@ -81,7 +83,7 @@ The DSL is the notation a flow is written in: a closed set of TypeScript primiti
 
 ### vocabulary
 
-The vocabulary is small and closed. Every verb takes a `Target` where it names a control, and takes values as accessors on the input (`i => i.username`) rather than as literals, so a flow is parameterized by construction.
+The vocabulary is small and closed. Every verb takes a `Target` where it names a control, and takes values as accessors on the input (`i => i.username`) rather than as literals, so a flow is parameterized by construction.<sup>[c](testing.md#design-claim-coverage "claim: dsl.parameterized-by-construction — phase 3")</sup>
 
 | | verb | does |
 | --- | --- | --- |
@@ -101,19 +103,19 @@ The vocabulary is small and closed. Every verb takes a `Target` where it names a
 | branch | `.optional(target, step)` | run a step only if the target resolves |
 | | `.oneOf([...])` | take one of a small set of expected screens |
 
-`.checkpoint()` and `.extract()` are the only ways to observe, and `.outcome()` and `.returns()` the only ways to finish. A capability can therefore do nothing the DSL does not name — the bound is structural, not a matter of review discipline.
+`.checkpoint()` and `.extract()` are the only ways to observe, and `.outcome()` and `.returns()` the only ways to finish. A capability can therefore do nothing the DSL does not name — the bound is structural, not a matter of review discipline.<sup>[c](testing.md#design-claim-coverage "claim: artifact.closed-vocabulary — phase 3")</sup>
 
-`.commit()` is a `.pressButton()` that is understood to be irreversible, and it exists because several rules need to name that step. It is never retried, since a timed-out commit may already have gone through. Approval required by the declared effects must precede it, which is checkable rather than merely intended. It is what the run record marks as the point where the dangerous thing happened. And a reader scanning a flow can see where it stops being reversible. Interfacer proposes which step is the commit during discovery — a submit that leaves a confirmation screen, wording like "transfer" or "delete" — and the user confirms, on the same terms as the other guardrails it proposes rather than decides.
+`.commit()` is a `.pressButton()` that is understood to be irreversible, and it exists because several rules need to name that step. It is never retried, since a timed-out commit may already have gone through.<sup>[c](testing.md#design-claim-coverage "claim: dsl.commit-never-retried — phase 3")</sup> Approval required by the declared effects must precede it, which is checkable rather than merely intended. It is what the run record marks as the point where the dangerous thing happened. And a reader scanning a flow can see where it stops being reversible. Interfacer proposes which step is the commit during discovery — a submit that leaves a confirmation screen, wording like "transfer" or "delete" — and the user confirms, on the same terms as the other guardrails it proposes rather than decides.
 
 #### branching
 
-There is no general branching. The flow is a builder, so plain TypeScript control flow cannot branch on page state anyway — an `if` runs while the flow is being built, before anything has executed. A statically enumerable step list is what lets the replay allowlist be computed from the flow and lets a step id mean the same thing on every run.
+There is no general branching. The flow is a builder, so plain TypeScript control flow cannot branch on page state anyway — an `if` runs while the flow is being built, before anything has executed. A statically enumerable step list is what lets the replay allowlist be computed from the flow and lets a step id mean the same thing on every run.<sup>[c](testing.md#design-claim-coverage "claim: dsl.no-general-branching — phase 3")</sup>
 
 What looks like branching is three narrower things:
 
-* **A path that ends the run** — "no such account" — is `.outcome()`. The engine terminates on a match; nothing after it executes.
-* **A step that may not be needed** — an intermittent consent screen — is `.optional(target, step)`, a no-op when the target does not resolve.
-* **A small set of expected screens** is `.oneOf([...])`, each arm naming its detector and its steps. The arms stay enumerable.
+* **A path that ends the run** — "no such account" — is `.outcome()`. The engine terminates on a match; nothing after it executes.<sup>[c](testing.md#design-claim-coverage "claim: dsl.outcome-terminates — phase 3")</sup>
+* **A step that may not be needed** — an intermittent consent screen — is `.optional(target, step)`, a no-op when the target does not resolve.<sup>[c](testing.md#design-claim-coverage "claim: dsl.optional-is-a-noop — phase 3")</sup>
+* **A small set of expected screens** is `.oneOf([...])`, each arm naming its detector and its steps. The arms stay enumerable.<sup>[c](testing.md#design-claim-coverage "claim: dsl.oneof-arms-enumerable — phase 3")</sup>
 
 Genuinely divergent tasks are two capabilities, not one with a branch, and choosing between them is the caller's decision.
 
@@ -121,7 +123,7 @@ Genuinely divergent tasks are two capabilities, not one with a branch, and choos
 
 Every step that touches the page names a control, and so does every checkpoint and every business-outcome detector. All three use one `Target` type, so there is a single answer to "how is this identified" rather than three.
 
-A target is not one selector but an ordered chain of strategies, recorded best-first:
+A target is not one selector but an ordered chain of strategies, recorded best-first:<sup>[c](testing.md#design-claim-coverage "claim: target.chain-recorded-best-first — phase 1")</sup>
 
 ```ts
 type Target = { by: 'role'; role: string; name?: string }
@@ -130,16 +132,16 @@ type Target = { by: 'role'; role: string; name?: string }
             | { by: 'css'; selector: string };
 ```
 
-The order reflects what survives a release. `role` and `label` describe what a control *is* and what an operator calls it; both come from the accessibility tree, which is also the representation a desktop surface would expose. `text` is next. `css` is last, because it describes where a control sits in a document rather than what it does. Generated class names and positional paths are excluded outright: they encode incidental structure and break on any re-render.
+The order reflects what survives a release. `role` and `label` describe what a control *is* and what an operator calls it; both come from the accessibility tree, which is also the representation a desktop surface would expose. `text` is next. `css` is last, because it describes where a control sits in a document rather than what it does. Generated class names and positional paths are excluded outright: they encode incidental structure and break on any re-render.<sup>[c](testing.md#design-claim-coverage "claim: target.preference-order — phase 1")</sup>
 
 | | discovery | replay |
 | --- | --- | --- |
 | strategies recorded | every one that resolves uniquely, ordered by preference | — |
 | validated by | must match exactly one element, and still match after a reload | must match exactly one element |
-| on multiple matches | rejected, model targets something else | hard failure, never "take the first" |
+| on multiple matches | rejected, model targets something else | hard failure, never "take the first"<sup>[c](testing.md#design-claim-coverage "claim: target.unique-match-required — phase 3")</sup> |
 | on primary miss | — | next strategy in the chain; which one won is recorded |
 
-A fallback winning is the drift signal. The primary strategy failing while a weaker one succeeds means the application changed in a way the artifact survived by luck, and it is reported with the run rather than passing silently — the same mismatch the variant stamp catches across tenants.
+A fallback winning is the drift signal. The primary strategy failing while a weaker one succeeds means the application changed in a way the artifact survived by luck, and it is reported with the run rather than passing silently<sup>[c](testing.md#design-claim-coverage "claim: target.fallback-is-drift — phase 3")</sup> — the same mismatch the variant stamp catches across tenants.
 
 The limit is worth stating plainly: on a page with no semantic markup, `css` is all there is, and no strategy makes that robust. What the chain buys there is not robustness but detection.
 
@@ -147,7 +149,7 @@ The limit is worth stating plainly: on a page with no semantic markup, `css` is 
 
 A TypeScript `interface` is erased at compile time and leaves nothing behind to read. But three consumers need the field list at run time: the MCP server, which must publish an input schema; the CLI parser, which must know the flags and which of them to refuse on argv; and the generated documentation. Declaring the type and then hand-writing a schema for them reintroduces exactly the second representation the artifact-as-program design exists to avoid.
 
-So inputs are declared as a runtime value, and the type is inferred from it:
+So inputs are declared as a runtime value, and the type is inferred from it:<sup>[c](testing.md#design-claim-coverage "claim: contract.input-type-inferred — phase 1")</sup>
 
 ```ts
 export const inputFields = fields({
@@ -161,11 +163,11 @@ export type Input = Infer<typeof inputFields>;
 // { url: string; username: string; password: Secret<string>; accountRef: string }
 ```
 
-One declaration, read three ways: the compiler checks the master function against `Input`, while MCP, the CLI and the docs read `input` itself. Adding a field changes all of them at once because there is only one of them to change.
+One declaration, read three ways: the compiler checks the master function against `Input`, while MCP, the CLI and the docs read `input` itself. Adding a field changes all of them at once because there is only one of them to change.<sup>[c](testing.md#design-claim-coverage "claim: contract.one-declaration-many-readers — phase 1")</sup>
 
-`secret()` has to be a runtime marker for the same reason. The rule that a secret is never accepted on argv is enforced by the CLI parser, which is ordinary code and cannot see a type — `password: Secret<string>` in an erased interface is unenforceable. As a value, `secret()` is what the parser reads to refuse the flag and what the run record reads to redact.
+`secret()` has to be a runtime marker for the same reason. The rule that a secret is never accepted on argv is enforced by the CLI parser, which is ordinary code and cannot see a type — `password: Secret<string>` in an erased interface is unenforceable. As a value, `secret()` is what the parser reads to refuse the flag and what the run record reads to redact.<sup>[c](testing.md#design-claim-coverage "claim: contract.secret-is-a-runtime-marker — phase 1")</sup>
 
-Results are inferred from the flow rather than declared beside it. Each `.outcome()` and the final `.returns()` widens the flow's result type as it is chained, so the union is a consequence of the steps:
+Results are inferred from the flow rather than declared beside it. Each `.outcome()` and the final `.returns()` widens the flow's result type as it is chained, so the union is a consequence of the steps:<sup>[c](testing.md#design-claim-coverage "claim: contract.answer-union-inferred — phase 3")</sup>
 
 ```ts
 const flow = new Flow({ id: 'checkAccountBalance', input: inputFields })
@@ -185,38 +187,38 @@ Declaring the union separately would be the same duplication in a second place: 
 
 One engine executes flows, and the DSL primitives are the only place it is instrumented. Besides driving Playwright, they emit the run record that constitutes a run's evidence, enforce the allowlist at every navigation, and classify failures according to the error taxonomy below.
 
-A flow author never writes a log line. Because the primitives are the sole instrumentation point, evidence is uniform across every capability, cannot be forgotten, and stays consistent between discovery and replay — the same calls emit it in both phases.
+A flow author never writes a log line. Because the primitives are the sole instrumentation point, evidence is uniform across every capability, cannot be forgotten, and stays consistent between discovery and replay<sup>[c](testing.md#design-claim-coverage "claim: record.author-writes-no-log-line — phase 3")</sup> — the same calls emit it in both phases.
 
 ### deterministic replay
 
 Replay is the engine walking a finished flow with no model attached. It is the path an agent triggers in production, and the only one that runs at volume.
 
-Determinism here is a claim about the decision procedure, not about the world: the same inputs produce the same steps, resolved the same way, verified against the same conditions, every run. It does not mean the application returns the same data — a balance changes between runs — and a capability written as though it would is simply wrong.
+Determinism here is a claim about the decision procedure, not about the world: the same inputs produce the same steps, resolved the same way, verified against the same conditions, every run.<sup>[c](testing.md#design-claim-coverage "claim: execution.deterministic-replay — phase 3")</sup> It does not mean the application returns the same data — a balance changes between runs — and a capability written as though it would is simply wrong.
 
-Every step runs the same cycle:
+Every step runs the same cycle:<sup>[c](testing.md#design-claim-coverage "claim: execution.step-cycle — phase 3")</sup>
 
 1. **Resolve** the target through its chain of strategies (see "targeting"). No match, or more than one, ends the step without acting.
 2. **Act**, or observe for `checkpoint` and `extract`. A navigation is checked against the replay allowlist at the point it happens, on the resolved URL.
 3. **Verify** the step's postcondition.
 4. **Record** the step, which strategy resolved it, and what happened, into the run record.
 
-Waiting is never a sleep. A step waits only for its own target to become actionable; any wait longer than that is an explicit `.pauseUntil()` with a predicate and a bound, so "loaded slowly" and "never loaded" stay distinguishable.
+Waiting is never a sleep. A step waits only for its own target to become actionable; any wait longer than that is an explicit `.pauseUntil()` with a predicate and a bound, so "loaded slowly" and "never loaded" stay distinguishable.<sup>[c](testing.md#design-claim-coverage "claim: execution.waiting-is-never-a-sleep — phase 4")</sup>
 
 #### verification order
 
 When a checkpoint or a postcondition is not satisfied, the engine does not fail immediately. In order:
 
-1. **Recover, if the condition is one the flow knows.** A declared interstitial is dismissed, a transient load is waited out, and the verification is retried up to its bound. These never reach the caller; they are recorded as evidence only.
-2. **Evaluate the declared outcome detectors**, in declaration order. The first match terminates the run with that outcome — a legitimate answer, returned rather than thrown.
+1. **Recover, if the condition is one the flow knows.** A declared interstitial is dismissed, a transient load is waited out, and the verification is retried up to its bound. These never reach the caller; they are recorded as evidence only.<sup>[c](testing.md#design-claim-coverage "claim: execution.recovery-before-judgement — phase 3")</sup>
+2. **Evaluate the declared outcome detectors**, in declaration order. The first match terminates the run with that outcome — a legitimate answer, returned rather than thrown.<sup>[c](testing.md#design-claim-coverage "claim: execution.outcomes-before-failure — phase 3")</sup>
 3. **Raise a hard failure**, only once nothing above matched.
 
 That order is the whole reason "no such account" is not a crash. Reversing steps 2 and 3 would turn every business outcome into an exception, which is the distinction the error taxonomy exists to preserve. Putting recovery first matters too: a modal can hide both the checkpoint and the outcome banner, so the page has to be legible before either can be judged.
 
-Retry is gated per step, not per capability. Resolution, reads, navigation and ordinary presses are freely retryable because they commit nothing; `.commit()` is never retried, because a timed-out commit may already have gone through and repeating it is worse than failing. A failed commit escalates instead (see "error categories"). Gating on the capability would forbid retrying the twenty safe steps that precede the one dangerous one, which is how a mutating capability becomes needlessly brittle.
+Retry is gated per step, not per capability. Resolution, reads, navigation and ordinary presses are freely retryable because they commit nothing; `.commit()` is never retried, because a timed-out commit may already have gone through and repeating it is worse than failing.<sup>[c](testing.md#design-claim-coverage "claim: execution.retry-gated-per-step — phase 3")</sup> A failed commit escalates instead (see "error categories"). Gating on the capability would forbid retrying the twenty safe steps that precede the one dangerous one, which is how a mutating capability becomes needlessly brittle.
 
 #### the result
 
-A run ends exactly one of three ways, and each maps to a distinct mechanism at the boundary:
+A run ends exactly one of three ways, and each maps to a distinct mechanism at the boundary:<sup>[c](testing.md#design-claim-coverage "claim: execution.three-endings — phase 3")</sup>
 
 | ending | produced by | surfaced as |
 | --- | --- | --- |
@@ -232,7 +234,7 @@ Discovery runs on this same engine — the difference is only that steps arrive 
 
 Execution never sleeps for a fixed duration and hopes. It **pauses** on an explicit resume predicate with a bound; a duration only ever bounds how long that predicate may stay false. `.wait(2000)` cannot distinguish "loaded in 200ms" from "never loaded"; a predicate can.
 
-Waiting and human escalation are the same primitive: suspend, let something outside the flow change the world, resume after re-checking a precondition. They differ only in the resolver.
+Waiting and human escalation are the same primitive: suspend, let something outside the flow change the world, resume after re-checking a precondition. They differ only in the resolver.<sup>[c](testing.md#design-claim-coverage "claim: pause.four-kinds — phase 4")</sup>
 
 | pause reason | primitive | resolver | on bound expiry |
 | --- | --- | --- | --- |
@@ -243,18 +245,18 @@ Waiting and human escalation are the same primitive: suspend, let something outs
 
 Two rules:
 
-* **Declared vs undeclared.** A pause named in the flow is part of the contract, not an incident: MFA on every login is expected, and a capability that declares it is simply attended rather than broken. Only an undeclared pause is an escalation.
-* **Resume re-asserts a checkpoint.** After a human touches the session the flow cannot assume where it is, so resume validates a checkpoint before continuing; a mismatch is a hard failure, not a blind continuation.
+* **Declared vs undeclared.** A pause named in the flow is part of the contract, not an incident: MFA on every login is expected, and a capability that declares it is simply attended rather than broken. Only an undeclared pause is an escalation.<sup>[c](testing.md#design-claim-coverage "claim: pause.declared-is-not-an-escalation — phase 4")</sup>
+* **Resume re-asserts a checkpoint.** After a human touches the session the flow cannot assume where it is, so resume validates a checkpoint before continuing; a mismatch is a hard failure, not a blind continuation.<sup>[c](testing.md#design-claim-coverage "claim: pause.resume-reasserts-a-checkpoint — phase 4")</sup>
 
-Every pause is bounded — an escalation nobody answers becomes a hard failure with evidence, never a hang. Control transfer is recorded as evidence: who held control, for how long, and before/after state.
+Every pause is bounded — an escalation nobody answers becomes a hard failure with evidence, never a hang.<sup>[c](testing.md#design-claim-coverage "claim: pause.every-pause-bounded — phase 4")</sup> Control transfer is recorded as evidence: who held control, for how long, and before/after state.<sup>[c](testing.md#design-claim-coverage "claim: record.control-transfer-is-evidence — phase 4")</sup>
 
 ### error categories
 
 Errors are categorized by who needs to act on them, and each category surfaces through a different mechanism:
 
-* **Business outcome** — a legitimate answer to the question the caller asked ("no such account", "not authorized"). The run succeeded: it found out something true. Returned as a member of the master function's result union, never thrown. Every business outcome a capability can produce is declared in the flow together with the page condition that detects it.
-* **Recoverable** — a transient or known-interstitial condition: a slow load, a dismissable dialog, a retryable timeout. Handled inside the DSL by waiting, retrying, or dismissing. Recorded in the trace as evidence, but never surfaced to the caller. Retry is gated per step: everything retries except `.commit()`, which never does, because a timed-out commit may already have gone through. A failed commit escalates instead of retrying.
-* **Hard failure** — the flow could not continue and no declared outcome matched: a checkpoint never satisfied, an expired session, an unreachable surface, an unexpected application error. Thrown as a typed exception carrying the step id, what was expected, what was observed, and the run id that locates the rest in the record.
+* **Business outcome** — a legitimate answer to the question the caller asked ("no such account", "not authorized"). The run succeeded: it found out something true. Returned as a member of the master function's result union, never thrown.<sup>[c](testing.md#design-claim-coverage "claim: errors.business-outcome-returned — phase 3")</sup> Every business outcome a capability can produce is declared in the flow together with the page condition that detects it.
+* **Recoverable** — a transient or known-interstitial condition: a slow load, a dismissable dialog, a retryable timeout. Handled inside the DSL by waiting, retrying, or dismissing. Recorded in the trace as evidence, but never surfaced to the caller.<sup>[c](testing.md#design-claim-coverage "claim: errors.recoverable-is-evidence-only — phase 3")</sup> Retry is gated per step: everything retries except `.commit()`, which never does, because a timed-out commit may already have gone through. A failed commit escalates instead of retrying.
+* **Hard failure** — the flow could not continue and no declared outcome matched: a checkpoint never satisfied, an expired session, an unreachable surface, an unexpected application error. Thrown as a typed exception carrying the step id, what was expected, what was observed, and the run id that locates the rest in the record.<sup>[c](testing.md#design-claim-coverage "claim: errors.hard-failure-is-typed — phase 3")</sup>
 
 Detection order matters. When a checkpoint is not satisfied, the engine first evaluates the declared business-outcome detectors, and raises a hard failure only if none of them match. Without that ordering every business outcome would arrive as a crash, which is precisely the distinction this taxonomy exists to preserve.
 
@@ -309,7 +311,7 @@ The last questions are the ones users do not volunteer on their own, so Interfac
 
 Where Interfacer proposes rather than asks, the user still confirms. A model that resolves its own guardrails is authoring the constraint it is bound by.
 
-On a rerun against an existing project, the interview is a delta rather than a repeat. The project's own declarations are the recorded answers — `fields()`, `effects`, `interactions`, the allowlist, and the outcomes the flow declares — so Interfacer reads those and asks only about what the new goal leaves unsettled or contradicts. Re-running an unchanged capability should cost a confirmation, not a second pass through every question.
+On a rerun against an existing project, the interview is a delta rather than a repeat. The project's own declarations are the recorded answers<sup>[c](testing.md#design-claim-coverage "claim: interview.rerun-is-a-delta — phase 9")</sup> — `fields()`, `effects`, `interactions`, the allowlist, and the outcomes the flow declares — so Interfacer reads those and asks only about what the new goal leaves unsettled or contradicts. Re-running an unchanged capability should cost a confirmation, not a second pass through every question.
 
 Reading the code rather than a sidecar file is what keeps a hand-edited project honest: an edit to the flow is visible to the next interview immediately, instead of being contradicted by a stale record of what was once asked for.
 
@@ -323,9 +325,9 @@ The file is markdown prose, not a structured document. The interview is a conver
 
 The flag also makes the run non-interactive. If the answers are insufficient, Interfacer exits listing which ones are missing rather than blocking on a question nobody is present to answer; filling those in and re-running is the loop.
 
-Presence in the file counts as confirmation, which matters for the two things Interfacer proposes rather than asks — the allowlist and `securityEffect`. Unattended there is nobody to confirm them, so a proposal for either that is absent from the file is a missing answer and fails, rather than being accepted silently. A human wrote and committed the file, so the file is the authorization record.
+Presence in the file counts as confirmation, which matters for the two things Interfacer proposes rather than asks — the allowlist and `securityEffect`. Unattended there is nobody to confirm them, so a proposal for either that is absent from the file is a missing answer and fails, rather than being accepted silently. A human wrote and committed the file, so the file is the authorization record.<sup>[c](testing.md#design-claim-coverage "claim: interview.file-is-the-authorization — phase 9")</sup>
 
-The file is an input only. Interfacer never writes one back, because there would be nothing to write that the project does not already hold: the inputs are the `fields()` declaration, the outcomes are inferred from the flow, the interactions, effects and allowlist are exported declarations. Recording them again as prose would be a second copy of the contract, free to drift the moment someone edits the flow by hand — and the flow is meant to be edited by hand.
+The file is an input only. Interfacer never writes one back<sup>[c](testing.md#design-claim-coverage "claim: interview.never-written-back — phase 9")</sup>, because there would be nothing to write that the project does not already hold: the inputs are the `fields()` declaration, the outcomes are inferred from the flow, the interactions, effects and allowlist are exported declarations. Recording them again as prose would be a second copy of the contract, free to drift the moment someone edits the flow by hand — and the flow is meant to be edited by hand.
 
 So the file bootstraps a capability where no project exists yet. Once one does, the project is the record, and copying an input file to record the same capability against another tenant is still available but is the weaker path; seeded discovery from a sibling project is the better one.
 
@@ -337,9 +339,9 @@ An unattended run needs a spending bound, since nothing is watching it. The budg
 
 Interactively there is nothing to bound, so Interfacer only reports: an interactive run ends by saying what it cost. That number is what a human writes into the interview file when they later set one up to run unattended, so the ceiling is informed by a run that was actually paid for rather than guessed at.
 
-A file that reaches an unattended run with no budget is missing an answer like any other, and the run exits saying which. There is no fallback default, because a default nobody chose is not an authorization.
+A file that reaches an unattended run with no budget is missing an answer like any other, and the run exits saying which. There is no fallback default, because a default nobody chose is not an authorization.<sup>[c](testing.md#design-claim-coverage "claim: agent.no-default-budget — phase 9")</sup>
 
-Interfacer accumulates spend from the `usage` on every response, counting cached and uncached input at their own rates, since discovery resends history constantly. The budget is also given to the model as an advisory ceiling so it paces itself, but the model is only informed: the harness holds the hard cap. A run that stops changing the page ends the same way whatever budget remains, since an agent retrying the same thing should not spend the rest of the ceiling doing it.
+Interfacer accumulates spend from the `usage` on every response, counting cached and uncached input at their own rates, since discovery resends history constantly.<sup>[c](testing.md#design-claim-coverage "claim: agent.spend-counts-cache-rates — phase 1")</sup> The budget is also given to the model as an advisory ceiling so it paces itself, but the model is only informed: the harness holds the hard cap.<sup>[c](testing.md#design-claim-coverage "claim: agent.harness-holds-the-cap — phase 8")</sup> A run that stops changing the page ends the same way whatever budget remains<sup>[c](testing.md#design-claim-coverage "claim: agent.stall-guard-ends-the-run — phase 8")</sup>, since an agent retrying the same thing should not spend the rest of the ceiling doing it.
 
 Interactively, reaching the cap is a `pauseForApproval` rather than a failure — approving raises the ceiling and continues. Unattended there is nobody to ask, so the run stops, and Interfacer writes out the partial flow so a re-run with a raised budget continues from it instead of restarting.
 
@@ -351,11 +353,11 @@ Steps are proposed one at a time and validated by execution before they are kept
 
 **Live values.** Discovery needs real values to work with: a username that logs in, an account that exists. The model asks for them as it needs them, matching the input parameters the interview established. They are held for the life of the run and never written anywhere — not into the project, not into the run record. A live value for a `secret()` input is a real credential, and the redaction that applies to it at replay applies here.
 
-**Outcome detectors.** The interview declared what the task can end in besides success. Generation has to find the page condition that detects each one, which means deliberately reaching those states rather than only the happy path — so it asks for values chosen to provoke them: an account reference that does not exist, a user without the entitlement. A declared outcome that cannot be reached during discovery gets no detector, and Interfacer reports it as unverified rather than recording a guess. Recording a guess would be worse than nothing: the arm would exist in the contract while the condition it names arrived at replay as a hard failure.
+**Outcome detectors.** The interview declared what the task can end in besides success. Generation has to find the page condition that detects each one, which means deliberately reaching those states rather than only the happy path — so it asks for values chosen to provoke them: an account reference that does not exist, a user without the entitlement. A declared outcome that cannot be reached during discovery gets no detector, and Interfacer reports it as unverified rather than recording a guess.<sup>[c](testing.md#design-claim-coverage "claim: generation.detectors-are-provoked — phase 10")</sup> Recording a guess would be worse than nothing: the arm would exist in the contract while the condition it names arrived at replay as a hard failure.
 
 **The commit step.** Where the task changes something, Interfacer proposes which step is the point of no return and the user confirms, so `.commit()` is marked in the flow rather than inferred at replay. The same pass proposes `securityEffect` from what the pages give up — a password field being written rather than used to log in, labels like MFA, signer, role or entitlement, routes such as `/security`, confirmation text along the lines of "your password has been changed" — and the user confirms that too.
 
-The DSL never embeds live values. Values collected during the interview become typed input parameters, and the flow refers to them by accessor rather than by literal, so the generated artifact is parameterized by construction and contains no credentials or PII.
+The DSL never embeds live values. Values collected during the interview become typed input parameters, and the flow refers to them by accessor rather than by literal, so the generated artifact is parameterized by construction and contains no credentials or PII.<sup>[c](testing.md#design-claim-coverage "claim: generation.no-live-values-in-the-artifact — phase 10")</sup>
 
 The end result looks something like this:
 
@@ -388,7 +390,7 @@ checkAccountBalanceFlow.run(liveValues, { headless: false });
 
 Each target is a chain, best-first: the semantic strategy that should survive a release, backed by the selector that was observed to work. The flow declares no result type — it is inferred from the `.outcome()` and `.returns()` calls — and no version, which is the project's. This capability only reads, so it contains no `.commit()`.
 
-Generation ends when the goal is reached — the checkpoint holds and the declared result can be extracted — or when the budget or the stall guard stops it first, in which case the partial flow is still written and a later run continues from it.
+Generation ends when the goal is reached — the checkpoint holds and the declared result can be extracted — or when the budget or the stall guard stops it first, in which case the partial flow is still written and a later run continues from it.<sup>[c](testing.md#design-claim-coverage "claim: generation.partial-flow-is-written — phase 10")</sup>
 
 ### the agent loop
 
@@ -398,19 +400,19 @@ Credentials come from the environment: `API_KEY`, and `MODEL` where the default 
 
 The key is a discovery-time credential only. A generated project never calls a model, so it never needs one; nothing about the key reaches the project, the flow, or the run record.
 
-Provider portability is a seam, not an abstraction layer. Every SDK call lives in one module behind a single `decide(state, tools)` function, and nothing else in Interfacer imports the SDK — so moving to another provider means rewriting that one module. There is no provider registry, no lowest-common-denominator message format, and no attempt to support two providers at once.
+Provider portability is a seam, not an abstraction layer. Every SDK call lives in one module behind a single `decide(state, tools)` function, and nothing else in Interfacer imports the SDK<sup>[c](testing.md#design-claim-coverage "claim: agent.one-sdk-seam — phase 8")</sup> — so moving to another provider means rewriting that one module. There is no provider registry, no lowest-common-denominator message format, and no attempt to support two providers at once.
 
 The model is given the contract the interview established — the inputs, the declared outcomes it must find detectors for, the effects, and the allowlist — and its job is to produce a flow that satisfies it.
 
 #### what the model sees
 
-Each turn the model receives an **accessibility snapshot** of the current page: the roles, names and structure a screen reader would get, rather than raw HTML. Three reasons, heaviest first.
+Each turn the model receives an **accessibility snapshot** of the current page: the roles, names and structure a screen reader would get, rather than raw HTML.<sup>[c](testing.md#design-claim-coverage "claim: agent.sees-the-accessibility-tree — phase 8")</sup> Three reasons, heaviest first.
 
 * It is the same vocabulary as the targets it has to produce. A model shown `button "Look up"` proposes `byRole('button', 'Look up')`. A model shown a wall of `<div>`s proposes a brittle CSS path, because that is all it was given to work with — the observation format decides the locator quality.
 * It degrades better than markup. A server-rendered page of nested tables yields a poor tree, but a poor tree is still smaller and more navigable than the markup behind it, and text content survives either way.
 * It is what an OS accessibility API would also provide, so the observation seam and the targeting seam are the same seam.
 
-A **screenshot** is a second tool rather than a default, for when the tree is ambiguous — three unlabelled buttons, a layout question structure does not answer. It informs the decision and can never be the target: nothing durable can be recorded from a coordinate, so a control located by eye must still be committed as an element identified in the tree.
+A **screenshot** is a second tool rather than a default, for when the tree is ambiguous — three unlabelled buttons, a layout question structure does not answer. It informs the decision and can never be the target: nothing durable can be recorded from a coordinate<sup>[c](testing.md#design-claim-coverage "claim: agent.screenshot-is-never-a-target — phase 8")</sup>, so a control located by eye must still be committed as an element identified in the tree.
 
 Page content is untrusted input. Whatever the model reads may contain instructions, and the allowlist is what bounds the consequence of that succeeding.
 
@@ -425,9 +427,9 @@ The model's tools are the DSL vocabulary, one tool per verb. Calling a tool exec
 | `snapshot`, `screenshot` | observe; record nothing |
 | `ask` | put a question to the human — a live value, or help when stuck |
 
-Acting and recording are one operation, so the flow cannot drift from what actually happened; there is no separate "write down what you did" step to get wrong, and no transcript to reconstruct the artifact from afterwards.
+Acting and recording are one operation, so the flow cannot drift from what actually happened<sup>[c](testing.md#design-claim-coverage "claim: agent.acting-and-recording-are-one — phase 8")</sup>; there is no separate "write down what you did" step to get wrong, and no transcript to reconstruct the artifact from afterwards.
 
-The model never writes TypeScript. It calls tools, Interfacer emits the source from the accumulated flow, and the artifact therefore cannot contain anything the vocabulary does not permit. Letting the model author code directly would put arbitrary TypeScript in the one place the design most needs to stay bounded.
+The model never writes TypeScript. It calls tools, Interfacer emits the source from the accumulated flow, and the artifact therefore cannot contain anything the vocabulary does not permit.<sup>[c](testing.md#design-claim-coverage "claim: agent.model-never-writes-typescript — phase 8")</sup> Letting the model author code directly would put arbitrary TypeScript in the one place the design most needs to stay bounded.
 
 #### between turns
 
@@ -447,9 +449,9 @@ It is meant to be used in three ways, and the same master function serves all of
 * **as a library**, imported into a caller's codebase and called as an ordinary typed function
 * **as an MCP server**, so yet another agent can discover the capability by name and invoke it with typed arguments
 
-None of the three is primary, and none is a wrapper around another.
+None of the three is primary, and none is a wrapper around another.<sup>[c](testing.md#design-claim-coverage "claim: project.three-equal-surfaces — phase 7")</sup>
 
-The package declares a `bin` entry, so the capability runs as `npx <project-name>` and takes its inputs as command-line arguments (`--username user35`), the flags being read from the same `input` declaration. Parameters declared with `secret()` are never accepted on argv: the parser refuses the flag and takes the value from the environment or stdin instead, so it does not land in shell history or in process listings.
+The package declares a `bin` entry, so the capability runs as `npx <project-name>` and takes its inputs as command-line arguments (`--username user35`), the flags being read from the same `input` declaration. Parameters declared with `secret()` are never accepted on argv: the parser refuses the flag and takes the value from the environment or stdin instead<sup>[c](testing.md#design-claim-coverage "claim: project.secret-refused-on-argv — phase 7")</sup>, so it does not land in shell history or in process listings.
 
 ### master function contract
 
@@ -468,7 +470,7 @@ export interface Secret<T = string> {
 }
 ```
 
-`Secret` makes redaction the default rather than a logging convention that has to be remembered at every call site: string interpolation and `JSON.stringify` both yield `[redacted]`, so a secret can reach the page only through an explicit `.reveal()` inside a DSL primitive.
+`Secret` makes redaction the default rather than a logging convention that has to be remembered at every call site: string interpolation and `JSON.stringify` both yield `[redacted]`,<sup>[c](testing.md#design-claim-coverage "claim: secrets.redaction-is-the-default — phase 1")</sup> so a secret can reach the page only through an explicit `.reveal()` inside a DSL primitive.<sup>[c](testing.md#design-claim-coverage "claim: secrets.revealed-only-in-a-primitive — phase 3")</sup>
 
 The input is the `fields()` declaration the interview produced, and both the type and the result union are derived rather than written:
 
@@ -503,7 +505,7 @@ export function checkAccountBalance(
 ): Promise<Answer | Suspended>;
 ```
 
-`suspended` is a control state, not a business outcome, and it is precisely what you get when no resolver is available. The overloads make that visible in the type: a caller that supplies a resolver never handles the arm at all.
+`suspended` is a control state, not a business outcome, and it is precisely what you get when no resolver is available. The overloads make that visible in the type: a caller that supplies a resolver never handles the arm at all.<sup>[c](testing.md#design-claim-coverage "claim: project.resolver-removes-the-suspended-arm — phase 4")</sup>
 
 ```ts
 export interface InteractionRequest {
@@ -525,9 +527,9 @@ export function resume(
 
 One resolver handles every kind rather than a callback per kind: the set of kinds will grow, and caller policy ("deny every approval when unattended") then lives in one place instead of three. The CLI's keyboard reader is just the built-in resolver.
 
-The cost of that choice is that the response type is not tied to the request kind — nothing in the signature stops a caller answering an `approval` with a string, or an `input` with `true`. The engine validates the response against the kind it asked for and treats a mismatch as a hard failure. A per-kind callback would have made this a compile error, at the price of triplicating the policy every caller has to write; keeping the policy in one place is worth a runtime check.
+The cost of that choice is that the response type is not tied to the request kind — nothing in the signature stops a caller answering an `approval` with a string, or an `input` with `true`. The engine validates the response against the kind it asked for and treats a mismatch as a hard failure.<sup>[c](testing.md#design-claim-coverage "claim: pause.response-validated-against-kind — phase 4")</sup> A per-kind callback would have made this a compile error, at the price of triplicating the policy every caller has to write; keeping the policy in one place is worth a runtime check.
 
-Declared interactions are published alongside the contract, so a caller knows before invoking that this capability will stop and ask. Whether it needs an attended session is not declared separately — it is whether `interactions` is non-empty. Declaring both would let a capability announce an MFA pause and claim to run unattended, and nothing would catch the contradiction.
+Declared interactions are published alongside the contract, so a caller knows before invoking that this capability will stop and ask. Whether it needs an attended session is not declared separately — it is whether `interactions` is non-empty.<sup>[c](testing.md#design-claim-coverage "claim: project.attended-iff-interactions — phase 4")</sup> Declaring both would let a capability announce an MFA pause and claim to run unattended, and nothing would catch the contradiction.
 
 ```ts
 export const interactions = {
@@ -563,7 +565,7 @@ export class SurfaceUnavailable extends ReplayError {}
 export function isReplayError(e: unknown): e is ReplayError;
 ```
 
-`isReplayError` is exported because TypeScript types a `catch` binding as `unknown` and has no `throws` clause. Without the guard, consumers lose the typing at the one place they need it.
+`isReplayError` is exported because TypeScript types a `catch` binding as `unknown` and has no `throws` clause.<sup>[c](testing.md#design-claim-coverage "claim: errors.guard-is-exported — phase 3")</sup> Without the guard, consumers lose the typing at the one place they need it.
 
 ### parked runs
 
@@ -575,7 +577,7 @@ A parked run is held in memory beside its browser handle, in a plain `Map<sessio
 
 How many exist follows from the surface. A CLI invocation holds none. A library host or an MCP server can hold several at once, one per concurrent call, which is the only reason this is a map rather than a single slot.
 
-Two rules stop it leaking. Every parked run has a TTL, and expiry kills the browser and marks the run a hard failure with evidence, so a forgotten session cannot strand a browser process. And `resume` is single-shot: a second call on the same id is an error.
+Two rules stop it leaking. Every parked run has a TTL, and expiry kills the browser and marks the run a hard failure with evidence, so a forgotten session cannot strand a browser process.<sup>[c](testing.md#design-claim-coverage "claim: parked.ttl-kills-the-browser — phase 4")</sup> And `resume` is single-shot: a second call on the same id is an error.<sup>[c](testing.md#design-claim-coverage "claim: parked.single-shot-resume — phase 4")</sup>
 
 Deliberate cut: parked runs die with the process. A live browser cannot be restored mid-flow, so recovery after a crash means re-running from step 0 with restored storage state — re-execution, not resume.
 
@@ -585,7 +587,7 @@ Everything above the boundary — the flow, the contract, the effects — is the
 
 * **run from command line** — success and business outcomes both print the result object as JSON and exit 0, because both are answers. A hard failure prints the error and the run id to stderr and exits nonzero, adding where the attachments went if it was configured to write any — it knows, because it configured it. A `suspended` result is handled in-process by a default resolver that prints the prompt and reads the response from the keyboard, then calls `resume` — so the command still looks like a single blocking invocation. For `operator` pauses the browser is already headed: the flow simply stops driving it, the human uses that same window, and Enter signals resume.
 * **integrate into larger codebases using master function** — call it directly: `switch` on `result.status` for outcomes, `try`/`catch` with `isReplayError` for hard failures. Supply a `resolver` and the `suspended` arm never appears; omit it only if the host wants to park runs itself.
-* **make it available as MCP for other LLMs** — the tool's input and output schemas are read from the `input` and `effects` declarations and the flow's outcomes, so a calling LLM sees `account_not_found` as a declared possible answer and gets each field's description as written in the interview. Business outcomes come back as normal tool results; only hard failures set `isError`. `suspended` is returned as a normal result with a companion `resume` tool, because an MCP tool cannot call back into its caller mid-execution — the agent obtains the value however it can and calls `resume` with the session id.
+* **make it available as MCP for other LLMs** — the tool's input and output schemas are read from the `input` and `effects` declarations and the flow's outcomes, so a calling LLM sees `account_not_found` as a declared possible answer and gets each field's description as written in the interview. Business outcomes come back as normal tool results; only hard failures set `isError`.<sup>[c](testing.md#design-claim-coverage "claim: project.mcp-publishes-outcomes — phase 7")</sup> `suspended` is returned as a normal result with a companion `resume` tool, because an MCP tool cannot call back into its caller mid-execution — the agent obtains the value however it can and calls `resume` with the session id.
 
 The MCP case is the sharpest argument for returning business outcomes rather than throwing them. An exception crossing the MCP boundary becomes an opaque tool error, and the calling agent can no longer distinguish "this account does not exist" from "the application is broken" — which is the one distinction it most needs in order to decide what to do next.
 
@@ -597,7 +599,7 @@ It speaks over **stdio**, which is what "local" means here: the client launches 
 
 The server exposes one tool, because one project is one capability. The tool is named for the capability `id`, its input schema is read from `inputFields` and its output schema from the flow's declared outcomes, so a calling agent sees `account_not_found` as a possible answer rather than meeting it as an error. The `effects` declaration is published in the tool description, so an agent can see that a capability writes, moves funds or changes authority before deciding to call it. Where the capability declares interactions, a companion `resume` tool is exposed alongside.
 
-**Secrets are not tool arguments.** Fields declared with `secret()` are omitted from the published input schema and read from the server process's environment instead. A calling agent has no business holding operator credentials for a back-office system, and a tool schema that asks for a password invites precisely that. It is the same rule as the CLI's refusal on argv, applied to a different kind of caller.
+**Secrets are not tool arguments.** Fields declared with `secret()` are omitted from the published input schema and read from the server process's environment instead.<sup>[c](testing.md#design-claim-coverage "claim: project.mcp-omits-secrets — phase 7")</sup> A calling agent has no business holding operator credentials for a back-office system, and a tool schema that asks for a password invites precisely that. It is the same rule as the CLI's refusal on argv, applied to a different kind of caller.
 
 They reach the server as environment, set once where the client registers it:
 
@@ -643,25 +645,27 @@ The allowlist is derived from the interview rather than hand-written, so it cann
 | width | wider — the agent explores pages that will not survive into the final flow | exactly the origins the artifact touches |
 | purpose | guardrail on a non-deterministic model | tripwire: leaving it means the application changed |
 
-The confirmation step is not optional. "login to mybank.com" leaves `auth.mybank.com`, an SSO redirect to a third-party identity provider, and `cdn.mybank.net` undecided; a model that settles those edge cases for itself is authoring its own constraint. Interfacer proposes concrete host patterns, the user confirms, and the confirmed list is stored explicitly in the project.
+The confirmation step is not optional. "login to mybank.com" leaves `auth.mybank.com`, an SSO redirect to a third-party identity provider, and `cdn.mybank.net` undecided; a model that settles those edge cases for itself is authoring its own constraint. Interfacer proposes concrete host patterns, the user confirms, and the confirmed list is stored explicitly in the project.<sup>[c](testing.md#design-claim-coverage "claim: allowlist.confirmed-not-inferred — phase 9")</sup>
 
-The discovery allowlist is also the prompt-injection backstop: the agent reads page content, page content can contain instructions, and the allowlist is what stops a successful injection from becoming a navigation anywhere.
+The discovery allowlist is also the prompt-injection backstop: the agent reads page content, page content can contain instructions, and the allowlist is what stops a successful injection from becoming a navigation anywhere.<sup>[c](testing.md#design-claim-coverage "claim: allowlist.backstops-prompt-injection — phase 8")</sup>
 
-The replay allowlist requires no user input at all and is strictly tighter. Any navigation outside it is a hard failure.
+The replay allowlist requires no user input at all and is strictly tighter. Any navigation outside it is a hard failure.<sup>[c](testing.md#design-claim-coverage "claim: allowlist.leaving-it-is-a-hard-failure — phase 3")</sup>
 
-Which *actions* are permitted is the other half of the same guardrail, and it is `mutates`: a capability declared `read` may not contain a `.commit()`, and one that does is rejected at generation rather than at replay. Hosts bound where the automation may go; `mutates` bounds what it may do once there.
+Both lists match on the **host**, and matching is anchored. A pattern is a concrete host, or a single leading `*.` standing for any subdomain of one: `mybank.com` admits `mybank.com` alone, and `*.mybank.com` admits `auth.mybank.com` and `a.b.mybank.com` but deliberately not the apex, which must be listed in its own right. Ports are not part of a pattern, because the unit here is the host.<sup>[c](testing.md#design-claim-coverage "claim: allowlist.host-patterns — phase 1")</sup> Anchoring is the point rather than a detail: `mybank.com.attacker.net` is a different host that a suffix match would admit, and an allowlist a lookalike passes is not one. For the same reason a pattern quietly covering one host more than the user read is the failure worth avoiding — so the apex is not folded into its own wildcard, and a bare `*` is refused outright rather than denied at run time, being a total bypass wearing the shape of a guardrail.
 
-Enforcement lives inside the DSL rather than around the process. Every navigation is checked where the DSL performs it — `.open()`, an activation that navigates, a popup or new tab — because the decision is per navigation: a process-level network permission cannot tell a legitimate page load from one an injection asked for. The check applies to the *resolved* URL after redirects, since an allowed host can redirect off-list.
+Which *actions* are permitted is the other half of the same guardrail, and it is `mutates`: a capability declared `read` may not contain a `.commit()`, and one that does is rejected at generation rather than at replay.<sup>[c](testing.md#design-claim-coverage "claim: effects.read-may-not-commit — phase 7")</sup> Hosts bound where the automation may go; `mutates` bounds what it may do once there.
+
+Enforcement lives inside the DSL rather than around the process. Every navigation is checked where the DSL performs it<sup>[c](testing.md#design-claim-coverage "claim: allowlist.enforced-inside-the-dsl — phase 3")</sup> — `.open()`, an activation that navigates, a popup or new tab — because the decision is per navigation: a process-level network permission cannot tell a legitimate page load from one an injection asked for. The check applies to the *resolved* URL after redirects, since an allowed host can redirect off-list.<sup>[c](testing.md#design-claim-coverage "claim: allowlist.judged-on-resolved-url — phase 3")</sup>
 
 ### effects
 
-Every capability declares its effects. They are published in the contract so a caller can see them before invoking, and each dimension drives a specific enforcement rather than a vague risk score.
+Every capability declares its effects. They are published in the contract so a caller can see them before invoking<sup>[c](testing.md#design-claim-coverage "claim: effects.published-to-the-caller — phase 7")</sup>, and each dimension drives a specific enforcement rather than a vague risk score.
 
 | dimension | values | enforcement |
 | --- | --- | --- |
 | `mutates` | read / write | a `read` capability containing a `.commit()` is rejected |
-| `reversible` | yes / compensable / no | `no` requires an approval pause before the `.commit()` |
-| `securityEffect` | none / authority-change / control-override | anything but `none` forces approval and attended execution |
+| `reversible` | yes / compensable / no | `no` requires an approval pause before the `.commit()`<sup>[c](testing.md#design-claim-coverage "claim: effects.irreversible-requires-approval — phase 6")</sup> |
+| `securityEffect` | none / authority-change / control-override | anything but `none` forces approval and attended execution<sup>[c](testing.md#design-claim-coverage "claim: effects.security-effect-forces-attended — phase 6")</sup> |
 | `idempotent` | yes / no | published so a caller knows whether re-invoking after a timeout is safe |
 | `dataClasses` | non-identifying / PII / full-PAN / SSN | governs redaction and what evidence may be captured |
 
@@ -679,7 +683,7 @@ Three further dimensions are declared but not enforced, because the enforcement 
 
 ### sensitive data
 
-Two requirements collide: evidence needs a rich signal on failure, and regulated data must never be persisted into logs. A failure screenshot of a back-office screen showing an account number and an SSN is precisely the forbidden thing. `dataClasses` arbitrates:
+Two requirements collide: evidence needs a rich signal on failure, and regulated data must never be persisted into logs. A failure screenshot of a back-office screen showing an account number and an SSN is precisely the forbidden thing. `dataClasses` arbitrates:<sup>[c](testing.md#design-claim-coverage "claim: dataclasses.govern-evidence — phase 5")</sup>
 
 | dataClasses | evidence permitted |
 | --- | --- |
@@ -689,7 +693,7 @@ Two requirements collide: evidence needs a rich signal on failure, and regulated
 
 Little diagnostic power is lost, because debugging needs structure rather than values: "the balance field was present but empty" localizes a fault as well as the figure itself would.
 
-Redaction happens **at capture time**, not before writing. Playwright's screenshot takes a mask of locators and paints over them before encoding, so an unredacted image never exists in a buffer or a temp file.
+Redaction happens **at capture time**, not before writing. Playwright's screenshot takes a mask of locators and paints over them before encoding, so an unredacted image never exists in a buffer or a temp file.<sup>[c](testing.md#design-claim-coverage "claim: dataclasses.masking-at-capture-time — phase 5")</sup>
 
 This applies to more than screenshots. Traces embed DOM and network bodies, and the leakiest artifact is the discovery transcript, since the LLM receives page content directly as input. `dataClasses` therefore also governs what may be sent to the model and what the transcript retains.
 
@@ -697,15 +701,15 @@ This applies to more than screenshots. Traces embed DOM and network bodies, and 
 
 ## evidence
 
-Evidence is exactly one thing: an append-only **run record**, one per run. Screenshots and DOM snapshots are attachments on an entry, not a second artifact — there is no separate trace, log, or transcript to correlate against.
+Evidence is exactly one thing: an append-only **run record**, one per run.<sup>[c](testing.md#design-claim-coverage "claim: record.one-append-only-log — phase 3")</sup> Screenshots and DOM snapshots are attachments on an entry, not a second artifact — there is no separate trace, log, or transcript to correlate against.
 
-Both phases produce the same record. Discovery adds entry kinds replay has no use for, but the format is one format, so a run that was recorded and a run that replayed are read side by side.
+Both phases produce the same record. Discovery adds entry kinds replay has no use for, but the format is one format<sup>[c](testing.md#design-claim-coverage "claim: record.same-format-both-phases — phase 1")</sup>, so a run that was recorded and a run that replayed are read side by side.
 
-Every entry carries the same envelope — run id, capability id, capability version from `package.json`, phase, step id, timestamp — and then a kind:
+Every entry carries the same envelope — run id, capability id, capability version from `package.json`, phase, step id, timestamp<sup>[c](testing.md#design-claim-coverage "claim: record.common-envelope — phase 3")</sup> — and then a kind:
 
 | kind | carries |
 | --- | --- |
-| `run.started` / `run.finished` | which inputs were supplied (names, never values) and the terminal status |
+| `run.started` / `run.finished` | which inputs were supplied (names, never values) and the terminal status<sup>[c](testing.md#design-claim-coverage "claim: record.inputs-by-name-only — phase 3")</sup> |
 | `step.started` / `step.finished` | the step id and which target strategy resolved it |
 | `navigation` | the resolved URL, and whether the allowlist permitted it |
 | `checkpoint` | satisfied or not |
@@ -713,7 +717,7 @@ Every entry carries the same envelope — run id, capability id, capability vers
 | `retry` | step id, reason, attempt number |
 | `pause` / `resume` | reason, which resolver answered, how long it waited |
 | `control.transferred` / `control.returned` | who took the session, for how long, and the state before and after |
-| `effect.performed` | the declared dimension the step carries, and the approval entry that authorized it |
+| `effect.performed` | the declared dimension the step carries, and the approval entry that authorized it<sup>[c](testing.md#design-claim-coverage "claim: record.effect-links-its-approval — phase 5")</sup> |
 | `model.turn` | discovery only: the model's stated reason for the step, the tool it called, and what the turn cost |
 | `error` | category, what was expected, what was observed |
 
@@ -721,21 +725,21 @@ Every entry carries the same envelope — run id, capability id, capability vers
 
 #### attachments
 
-Rich capture is expensive and sensitive, so it happens on triggers rather than continuously: a hard failure, a control transfer, and the `.commit()` step. Those are the three moments where somebody will later want to see the screen — a failure that must be diagnosed, a handoff whose before and after must be evidenced, and the point of no return.
+Rich capture is expensive and sensitive, so it happens on triggers rather than continuously: a hard failure, a control transfer, and the `.commit()` step.<sup>[c](testing.md#design-claim-coverage "claim: record.attachments-on-triggers — phase 5")</sup> Those are the three moments where somebody will later want to see the screen — a failure that must be diagnosed, a handoff whose before and after must be evidenced, and the point of no return.
 
 What may be captured is `dataClasses`, and the masking happens at capture time rather than before writing, so an unredacted image never exists (see "sensitive data"). An attachment is referenced from its entry, never inlined, and is written only where a directory has been configured to hold it.
 
 #### the two obligations
 
-**Nothing sensitive is written.** Secrets are structurally absent rather than filtered — `Secret` yields `[redacted]` through interpolation and `JSON.stringify`, so writing one out takes a deliberate `.reveal()`. Observed values are bounded by `dataClasses`.
+**Nothing sensitive is written.** Secrets are structurally absent rather than filtered<sup>[c](testing.md#design-claim-coverage "claim: secrets.never-reach-the-record — phase 3")</sup> — `Secret` yields `[redacted]` through interpolation and `JSON.stringify`, so writing one out takes a deliberate `.reveal()`. Observed values are bounded by `dataClasses`.
 
 **A dangerous step is unmistakable.** Someone auditing a run should be able to answer *did anything irreversible happen, and was it authorized* by reading the record, not by inferring it from a `step.finished` on a button press. That is what `effect.performed` is for: it names the declared dimension and links the `pause` entry that approved it. It is what turns the effects declarations from a claim in the contract into something observable after the fact — and if an approval is missing where one was required, the record shows that too.
 
 #### where it goes
 
-The record is a log, and is configured like one. Entries are emitted one per line as structured JSON, to **stdout by default**, so a run is pipeable and needs no path convention at all. A destination can be configured to send it to a file instead.
+The record is a log, and is configured like one. Entries are emitted one per line as structured JSON, to **stdout by default**, so a run is pipeable and needs no path convention at all.<sup>[c](testing.md#design-claim-coverage "claim: record.stdout-by-default — phase 3")</sup> A destination can be configured to send it to a file instead.
 
-One case is not a preference but a constraint: an MCP server's stdout is the protocol transport, so the record must never go there. It goes to stderr, or to a configured file.
+One case is not a preference but a constraint: an MCP server's stdout is the protocol transport, so the record must never go there. It goes to stderr, or to a configured file.<sup>[c](testing.md#design-claim-coverage "claim: record.never-on-mcp-stdout — phase 5")</sup>
 
 Attachments are the exception, because a screenshot cannot go to a stream. They require a directory to be configured; where none is, rich capture is skipped and the record says so rather than silently producing less than the reader expects. Making attachments opt-in this way also suits the data-handling story: capture happens where someone has chosen to put the files.
 
@@ -749,15 +753,15 @@ Hundreds of institutions run the same vendor products, configured, branded and v
 
 | difference | example | absorbed by |
 | --- | --- | --- |
-| deployment | same product, different host | the entry point is an ordinary input — one artifact serves every tenant differing only here |
-| branding | logo, colours, stylesheet, class names, layout chrome | semantic targeting: `role` and `label` do not change when a stylesheet does |
-| wording | one institution says "Member" where another says "Customer" | a target chain whose accessible name admits alternatives |
+| deployment | same product, different host | the entry point is an ordinary input — one artifact serves every tenant differing only here<sup>[c](testing.md#design-claim-coverage "claim: tenant.entry-point-is-an-input — phase 3")</sup> |
+| branding | logo, colours, stylesheet, class names, layout chrome | semantic targeting: `role` and `label` do not change when a stylesheet does<sup>[c](testing.md#design-claim-coverage "claim: tenant.branding-is-absorbed — phase 3")</sup> |
+| wording | one institution says "Member" where another says "Customer" | a target chain whose accessible name admits alternatives<sup>[c](testing.md#design-claim-coverage "claim: tenant.wording-is-absorbed — phase 3")</sup> |
 | configuration | a consent interstitial some tenants enable | `.optional()`, where the step is genuinely skippable |
-| structure | a screen split in two between releases, steps reordered, an outcome banner reworded | nothing — this needs its own artifact |
+| structure | a screen split in two between releases, steps reordered, an outcome banner reworded | nothing — this needs its own artifact<sup>[c](testing.md#design-claim-coverage "claim: tenant.structure-forks — phase 2")</sup> |
 
 The first four are the bulk of the hundreds, and none needs a per-tenant artifact. That matters more than the fork rule below, because branding and wording are what most tenants actually differ by. A flow whose targets lead with `role` and `label` is branding-invariant by construction — the same property that makes those strategies preferred in "targeting", earning its keep a second time.
 
-Alternatives are admitted for an accessible *name* and nothing else. That is deliberate: it absorbs the wording tier without becoming a general specialization mechanism, because a target that could vary its strategy or its structure per tenant is an override layer wearing a different hat.
+Alternatives are admitted for an accessible *name* and nothing else.<sup>[c](testing.md#design-claim-coverage "claim: target.alternatives-for-names-only — phase 1")</sup> That is deliberate: it absorbs the wording tier without becoming a general specialization mechanism, because a target that could vary its strategy or its structure per tenant is an override layer wearing a different hat.
 
 ### where the line is
 
@@ -781,11 +785,11 @@ export const variant = {
 } as const;
 ```
 
-Interfacer writes it during generation, from three sources. The capability id, the host discovery actually ran against and the date it ran are known directly. `vendor` and `appVersion` are proposed by the model from whatever the pages reveal — a product name in a title bar, a build string in a footer — and confirmed by the user, on the same terms as the allowlist. Where nobody knows, the field is absent rather than guessed: a fabricated version is worse than a missing one, because it reads as fact. A rerun rewrites the declaration like anything else Interfacer generates.
+Interfacer writes it during generation, from three sources. The capability id, the host discovery actually ran against and the date it ran are known directly. `vendor` and `appVersion` are proposed by the model from whatever the pages reveal<sup>[c](testing.md#design-claim-coverage "claim: variant.stamp-is-written — phase 10")</sup> — a product name in a title bar, a build string in a footer — and confirmed by the user, on the same terms as the allowlist. Where nobody knows, the field is absent rather than guessed: a fabricated version is worse than a missing one, because it reads as fact. A rerun rewrites the declaration like anything else Interfacer generates.
 
 It is read in three places. The engine emits it into the run record at `run.started`, so every run carries the provenance of the artifact that produced it. Seeded discovery reads a sibling's copy to know what a new variant is diverging from. And a router could key on it — routing belongs above a single generated project rather than inside one, so this declaration exists so that a router can be written, not because one is.
 
-It is deliberately **not** a runtime check. The obvious one — does the host match `recordedAgainst`? — is wrong by construction, because the entry point is an input parameter and one artifact serving many hosts is the intended tier-1 behaviour. A host difference is normal, not a signal.
+It is deliberately **not** a runtime check.<sup>[c](testing.md#design-claim-coverage "claim: variant.not-a-runtime-check — phase 10")</sup> The obvious one — does the host match `recordedAgainst`? — is wrong by construction, because the entry point is an input parameter and one artifact serving many hosts is the intended tier-1 behaviour. A host difference is normal, not a signal.
 
 Detection is behavioural instead, and the design already emits it:
 
@@ -793,7 +797,7 @@ Detection is behavioural instead, and the design already emits it:
 * **The stamp turns that into a diagnosis.** The realistic failure is not re-recording but copying a sibling project and pointing it at another institution, which leaves outcome detectors matching wording the new tenant does not use and quietly degrades a business outcome into a hard failure. The drift signal says something is wrong; the stamp in the same record says what the artifact was built against, which is what makes the cause findable rather than guessable. It works for that precisely because whoever copied the project changed the URL and did not think about this file — so it goes on naming the host the flow was really recorded against.
 * **Seeded discovery** is the cure rather than a guard, and it is not a separate mechanism. It is the project-update path with the seed copied in from elsewhere: copy a sibling project to a new location and run Interfacer there, the location is non-empty, and the existing flow becomes the starting point.
 
-What Interfacer does with a seed is verify it rather than trust it. The delta interview reads the copied declarations and asks only what the new tenant changes, which is usually the entry point alone. Generation then replays the existing flow against the new tenant rather than discovering from nothing: steps that still resolve are kept, steps that fail are re-discovered, and every declared outcome is provoked again — wording is precisely what differs between tenants, and a detector carried across unverified is the failure this section exists to prevent. The `variant` declaration is rewritten from what this run observed.
+What Interfacer does with a seed is verify it rather than trust it. The delta interview reads the copied declarations and asks only what the new tenant changes, which is usually the entry point alone. Generation then replays the existing flow against the new tenant rather than discovering from nothing<sup>[c](testing.md#design-claim-coverage "claim: generation.seeded-discovery-verifies — phase 10")</sup>: steps that still resolve are kept, steps that fail are re-discovered, and every declared outcome is provoked again — wording is precisely what differs between tenants, and a detector carried across unverified is the failure this section exists to prevent. The `variant` declaration is rewritten from what this run observed.
 
 That is also exactly the difference between seeding and the failure it guards against. Copying a project and editing the URL by hand keeps the sibling's detectors and the sibling's stamp, both now describing a different institution. Copying it and running Interfacer keeps only what still resolves. The two begin identically and diverge entirely in whether anything was checked.
 

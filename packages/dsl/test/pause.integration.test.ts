@@ -211,6 +211,7 @@ describe('a resolver answers, and the run completes', () => {
     expect(order[0]).toBe('pause');
   });
 
+  // @covers record.control-transfer-is-evidence
   it('says who held control, for how long, and what the page was either side', async () => {
     const captured = capture();
 
@@ -232,7 +233,7 @@ describe('a resolver answers, and the run completes', () => {
   });
 });
 
-// @covers pause.four-kinds
+// @covers pause.four-kinds pause.response-validated-against-kind
 describe('an answer of the wrong kind', () => {
   it('is a hard failure rather than a guess about what was meant', async () => {
     // One resolver serves every kind, so the response type cannot be tied to the

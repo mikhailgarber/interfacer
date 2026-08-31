@@ -101,6 +101,7 @@ expectTypeOf<InputOf<typeof flow>>().toEqualTypeOf<{
   accountRef: string;
 }>();
 
+// @covers dsl.parameterized-by-construction
 // Accessors are typed against that input, so a flow is parameterized by
 // construction and cannot close over a literal credential by accident.
 new Flow({ id: 'accessors', input: inputFields }).fillForm([css('#u')], (i) => {

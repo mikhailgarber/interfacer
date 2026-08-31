@@ -101,6 +101,7 @@ const RUN = { timeoutMs: 1_500, retries: 1, record: (): void => undefined } as c
  * `expect.stringContaining` is typed `any`, which would quietly let a renamed
  * field pass.
  */
+// @covers errors.guard-is-exported
 async function rejection(run: Promise<unknown>): Promise<ReplayError> {
   try {
     await run;

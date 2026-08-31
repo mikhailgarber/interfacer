@@ -58,6 +58,7 @@ describe('parseDuration', () => {
   });
 });
 
+// @covers pause.response-validated-against-kind
 describe('checkResponse', () => {
   // @covers pause.four-kinds
   it('admits exactly the answer each kind asked for', () => {

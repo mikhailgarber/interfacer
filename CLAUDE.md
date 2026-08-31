@@ -13,7 +13,11 @@ model in the replay path. See [README.md](README.md) for the shape of it.
   anywhere in the replay path). Implementing a rejected thing breaks a property the
   rest of the design depends on. If something is genuinely unspecified, say so and ask
   rather than inventing — and if the answer settles a design question, the design doc
-  is what gets amended.
+  is what gets amended. It is also the **claim registry**: a statement a test could
+  falsify carries an inline marker naming a claim id and the phase that should prove
+  it, rendered as a superscript `c` and read by `npm run claims`. Adding a statement
+  of that kind means adding a marker; see testing.md's *design-claim coverage* for
+  the exact form, where it goes, and what earns one.
 - **[docs/implementation-plan.md](docs/implementation-plan.md)** is the ordered build:
   eleven phases, each closed by a test tier. Amend it when the *plan* changes.
 - **[README.md](README.md)** and **[docs/testing.md](docs/testing.md)** describe what

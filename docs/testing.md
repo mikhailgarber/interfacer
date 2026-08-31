@@ -182,7 +182,6 @@ npm run verify            # build -> typecheck -> lint -> format:check -> test
 
 `npm run verify` is the gate. There is no CI; adding a pipeline later would change
 nothing about what it runs.
-
 Individual tiers: `npm run test:unit`, `test:fixtures`, `test:integration`,
 `test:agent`, `test:e2e`. `npm run fixtures` starts the fixture apps for a person to
 look at.
@@ -257,33 +256,66 @@ Line coverage says whether code ran. It cannot say whether the suite verifies wh
 the design claims — a module can sit at 100% and prove nothing, and the properties
 this design turns on are claims about behaviour.
 
-So the design's claims are enumerated in `test/claims.ts`, tests declare which ones
-they exercise with a `@covers <id>` comment, and the report joins the two. Each
-claim carries the implementation-plan phase that should verify it, so the report
-distinguishes a claim that is **pending** from one that is a **gap**:
+**The design document is the registry.** Where
+[design-requirements.md](design-requirements.md) makes a statement a test could
+falsify, that statement carries a marker naming the claim and the plan phase that
+should verify it:
 
-```
-phase 0    1/1
-phase 1   12/12
-phase 2    1/1
-phase 3   31/37   <- incomplete
-phase 4    0/8    <- incomplete
-...
-45/93 claims covered.
+```md
+Every DSL call carries a stable step id, so errors and evidence refer to
+`login.submit` rather than to a position that shifts whenever the flow is
+edited. <!-- claim: artifact.stable-step-ids phase:3 -->
 ```
 
-An uncovered claim from a phase already delivered is the number worth looking at.
-One from a later phase is simply not built yet.
+Tests declare what they exercise with a `@covers <id>` comment, and `test/claims.ts`
+reads the document, joins the two, and reports:
 
-`claims.unit.test.ts` keeps the registry honest — it fails on a `@covers` naming an
-id that does not exist, so renaming or dropping a claim cannot leave a test quietly
-asserting coverage of nothing. It deliberately does **not** fail on an uncovered
-claim: most of the design is unbuilt, and a gate that went red for unwritten phases
-would be switched off within a week.
+```
+  durable artifact
+    · artifact.no-serialized-form              phase 7   docs/design-requirements.md:41
+    ✓ artifact.stable-step-ids                 phase 3   docs/design-requirements.md:43
+        packages/dsl/test/engine.integration.test.ts
+```
 
-What it cannot check is its own completeness. The registry is written by hand from
-`docs/design-requirements.md`, and a claim nobody wrote down is a claim nobody will
-notice is untested — so read it against the design whenever the design changes.
+Each claim carries the phase that should verify it, so the report distinguishes a
+claim that is **pending** from one that is a **gap**. An uncovered claim from a
+phase already delivered is the number worth looking at; one from a later phase is
+simply not built yet.
+
+**Nothing about a claim is restated in code.** The section is the heading the marker
+sits under, the order is the document's, and the text is the statement the marker
+terminates — so none of them is a field that can drift. This replaces a hand-written
+registry that restated 90 claims in `test/claims.ts`; by the time it was retired, 87
+of the 90 no longer matched the design's words, four cited a heading that did not
+exist, and three architectural rejections were filed against a phase that had no way
+to test them.
+
+**Placing a marker.** Put it inline at the end of the statement it marks, never on
+its own line — a comment between list items terminates the list, and cannot sit in a
+table cell at all. The document is unwrapped, one paragraph per line, so a paragraph
+making two claims carries two markers and each claim runs from the previous marker.
+Place it after the sentence that states the claim, not at the end of the paragraph,
+so trailing rationale stays out of it.
+
+**What earns one.** A marker is a commitment that a test will exist, so a statement
+earns one if a test could falsify it at some phase. Rationale, comparisons, and
+restatements of a claim made canonically elsewhere do not; neither do positions that
+no assertion can catch. A rejection is marked at the phase where the rejected thing
+could actually be built — `artifact.no-serialized-form` is phase 7, because
+generation is the only place a manifest could get written.
+
+`claims.unit.test.ts` keeps the join honest at both ends. It fails on a `@covers`
+naming an id no marker declares, so renaming or dropping a claim cannot leave a test
+quietly asserting coverage of nothing; and it fails on a marker the parser cannot
+read, which is the more important half — a mistyped title still renders as a
+perfectly ordinary superscript, so nothing about the document would look wrong while
+the claim quietly vanished from the report. It deliberately does **not** fail
+on an uncovered claim: most of the design is unbuilt, and a gate that went red for
+unwritten phases would be switched off within a week.
+
+What it still cannot check is whether a statement that deserves a marker has one.
+That judgement is a human reading the design — but the reading is now against the
+document itself rather than against a paraphrase of it.
 
 ## not yet decided
 
