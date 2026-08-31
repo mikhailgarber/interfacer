@@ -196,12 +196,20 @@ export function danglingReferences(): string[] {
   return [...declaredCoverage().keys()].filter((id) => !known.has(id)).sort();
 }
 
-function report(): string {
+/**
+ * `--summary` prints the by-phase tally and nothing else.
+ *
+ * It exists because this runs at the end of every `npm run verify`, where a
+ * hundred lines of per-claim listing would bury the gate's own output. The
+ * listing is what you ask for when a number moved and you want to know which
+ * claim moved it.
+ */
+function report(summary: boolean): string {
   const rows = coverage();
   const lines: string[] = ['', 'Design-claim coverage', ''];
 
   let section = '';
-  for (const { claim, coveredBy } of rows) {
+  for (const { claim, coveredBy } of summary ? [] : rows) {
     if (claim.section !== section) {
       section = claim.section;
       lines.push(`  ${section}`);
@@ -223,7 +231,10 @@ function report(): string {
     });
   }
 
-  lines.push('', '  by phase', '');
+  if (!summary) {
+    lines.push('');
+  }
+  lines.push('  by phase', '');
   for (const [phase, tally] of [...byPhase.entries()].sort((a, b) => a[0] - b[0])) {
     lines.push(
       `    phase ${String(phase).padEnd(3)} ${String(tally.covered).padStart(2)}/${String(tally.total).padEnd(2)}${tally.covered === tally.total ? '' : '   <- incomplete'}`,
@@ -233,11 +244,15 @@ function report(): string {
   const covered = rows.filter((row) => row.coveredBy.length > 0).length;
   lines.push('', `  ${String(covered)}/${String(rows.length)} claims covered.`, '');
 
-  lines.push(
-    '  A claim from a later phase is pending, not a gap. An uncovered claim from a',
-    '  phase already delivered is the number worth looking at.',
-    '',
-  );
+  if (summary) {
+    lines.push('  `npm run claims` lists them.', '');
+  } else {
+    lines.push(
+      '  A claim from a later phase is pending, not a gap. An uncovered claim from a',
+      '  phase already delivered is the number worth looking at.',
+      '',
+    );
+  }
 
   // Never elided. A `@covers` naming a claim no marker declares is a broken
   // join, not a statistic — and the test tier fails on it either way.
@@ -254,5 +269,5 @@ function report(): string {
 }
 
 if (process.argv[1] !== undefined && import.meta.filename === process.argv[1]) {
-  process.stdout.write(report());
+  process.stdout.write(report(process.argv.includes('--summary')));
 }

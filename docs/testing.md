@@ -177,17 +177,27 @@ wearing a different hat.
 ```sh
 npm ci
 npm run setup:browsers    # Chromium, for the integration tier and above
-npm run verify            # build -> typecheck -> lint -> format:check -> test
+npm run verify            # build -> typecheck -> lint -> format:check -> test -> claims
 ```
 
 `npm run verify` is the gate. There is no CI; adding a pipeline later would change
 nothing about what it runs.
+
+It ends with the design-claim report in its `--summary` form — the by-phase tally
+only, since a hundred lines of per-claim listing would bury the gate's own output.
+`npm run claims` prints the full listing. That last step is a **report, not a
+threshold** — it fails
+only on a marker the parser cannot read, and never on an uncovered claim, for the
+reason given under *design-claim coverage* below. The guards that do gate — a
+`@covers` naming a claim that no longer exists, a duplicate id — run in the test tier
+before it.
+
 Individual tiers: `npm run test:unit`, `test:fixtures`, `test:integration`,
 `test:agent`, `test:e2e`. `npm run fixtures` starts the fixture apps for a person to
 look at.
 
 The steps `verify` chains are also runnable alone — `npm run build`, `typecheck`,
-`lint`, `format:check` — and `npm run format` writes the formatting that
+`lint`, `format:check`, `claims` — and `npm run format` writes the formatting that
 `format:check` only reports on.
 
 **Build before test.** Tests import `@interfacer/dsl` and `@interfacer/fixtures`
@@ -249,7 +259,8 @@ process cannot see another one, so it is tested but unmeasurable from here.
 ### design-claim coverage
 
 ```sh
-npm run claims
+npm run claims              # the full listing
+npm run claims -- --summary # the by-phase tally only; what `npm run verify` runs
 ```
 
 Line coverage says whether code ran. It cannot say whether the suite verifies what

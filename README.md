@@ -71,10 +71,10 @@ the project generator (Phase 7), and the agent loop (Phase 8).
 ```sh
 npm ci
 npm run setup:browsers    # Chromium, for the integration tier and above
-npm run verify            # build -> typecheck -> lint -> format:check -> test
+npm run verify            # build -> typecheck -> lint -> format:check -> test -> claims
 
 npm run coverage          # the tiers verify runs, with a line-coverage report
-npm run claims            # which of the design's claims the suite verifies
+npm run claims            # which of the design's claims the suite verifies, in full
 npm run fixtures          # start the fixture apps and print their URLs
 npm run watch             # keep dist/ current while editing (the editor reads it)
 ```
