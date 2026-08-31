@@ -31,8 +31,11 @@ default gate by accident.
   condition on demand. See **the fixtures** below.
 - **`integration`** — real browser, real fixture, no model. This is where the
   production path is proved: determinism, verification order, targeting and
-  fallback drift, retry gating, allowlist enforcement, pauses, redaction. Tests
-  author a `Flow` (see `packages/dsl/test/flows.ts`) and hand it to the engine.
+  fallback drift, retry gating, allowlist enforcement, pauses and parked runs,
+  redaction. Tests author a `Flow` (see `packages/dsl/test/flows.ts`) and hand it
+  to the engine. The resolvers the pause tests use are **fakes** — real functions
+  answering the way a CLI's keyboard reader or a host's policy would, asserted on
+  what the run produced rather than on how often they were called.
   It is by far the slowest tier that runs on every `verify` — around 65 seconds,
   most of it spent waiting out targets that are genuinely absent, which is the
   cost of the tests that prove a failure fails.
@@ -121,6 +124,12 @@ enforcement and record emission that only happen inside the engine's step cycle.
 The one current exception is `packages/dsl/test/browser.integration.test.ts`,
 which touches a Playwright `Page` directly to prove the browser toolchain is
 installed and drivable. From Phase 3 on it is the last test allowed to.
+
+`pause.integration.test.ts` launches a browser of its own for the parked-run TTL
+test and then asserts on `browser.contexts()`. That is not the exception wearing
+a disguise: it drives nothing, and the browser's lifecycle is the claim under
+test — a forgotten session must not strand a process, and the only honest way to
+show a session was killed is to hold the handle it was killed on.
 
 ## where tests live, and what enforces it
 
@@ -282,11 +291,13 @@ The runner config is the tier/location mapping and timeouts. These are real
 decisions that nothing has made yet, listed here so they are not mistaken for
 settled:
 
-- **Recovery beyond retry** — the first rung of the verification ladder is
-  currently "wait and try the step again". The design also names dismissing a
-  declared interstitial, which today is spelled `.optional()` in the flow rather
-  than handled by the engine. Whether those should be the same mechanism is
-  unsettled. *(Phase 4)*
+- **Obtained values in a navigation URL** — a value from `.pauseForInput()` is a
+  `Secret`, so the pause that asked for it records the prompt and the bound and
+  never the answer. But typing it into a form that submits by GET puts it in the
+  next `navigation` entry's URL in clear, because that entry records the resolved
+  URL and has no idea where the query string came from. Whether the record masks
+  a URL, and on what basis, is the same question `dataClasses` asks about page
+  content. *(Phase 5)*
 - **Frame traversal** — `hostile` serves a help panel inside an `<iframe>`, and
   the design says nothing about whether the engine resolves a target across a
   document boundary. The frame is deliberately off the critical path, so every
@@ -295,7 +306,10 @@ settled:
   exists inside a frame. *(Phase 3, if then)*
 - **Headed vs headless** — replay is headless by default and discovery is headed
   so a human can watch. Which the `agent` and `e2e` tiers use, and how that is
-  overridden locally, is undecided. *(Phase 8)*
+  overridden locally, is undecided. It is now also a question about
+  `.pauseForOperator()`: the design says the human uses the browser window that
+  is already open, which a headless run does not have, and nothing yet forces a
+  flow declaring an operator pause to run headed. *(Phase 8)*
 - **Run-record capture** — the record goes to stdout by default. Phase 3's
   redaction test asserts a secret sentinel appears nowhere in the record, in any
   attachment, or in any thrown error — scanning all output, not checking a field.

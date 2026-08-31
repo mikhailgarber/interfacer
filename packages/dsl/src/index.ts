@@ -6,10 +6,9 @@
  * is the only component a generated capability needs at run time, which is why a
  * capability in production never loads an SDK and never needs an API key.
  *
- * Phase 1 lands the contract and the pure primitives. Still to come:
+ * Phases 1, 3 and 4 land the contract, the pure primitives, the `Flow` builder,
+ * the execution engine, the pause primitives and parked runs. Still to come:
  *
- * - **Phase 3** — the `Flow` builder and the execution engine.
- * - **Phase 4** — the pause primitives, `Resolver`, and parked runs.
  * - **Phase 5** — record emission, attachments, and `dataClasses`.
  */
 
@@ -90,19 +89,44 @@ export {
 } from './verification.js';
 
 export {
+  ApprovalDenied,
   CheckpointFailed,
+  InteractionFailed,
   isReplayError,
   NavigationBlocked,
+  PauseExpired,
   ReplayError,
   SessionExpired,
   SurfaceUnavailable,
   TargetAmbiguous,
+  UnknownSession,
   type ReplayErrorDetail,
 } from './errors.js';
 
 export {
+  checkResponse,
+  DEFAULT_INTERACTION_BOUND_MS,
+  DEFAULT_PARK_TTL_MS,
+  DEFAULT_SURFACE_BOUND_MS,
+  isSuspended,
+  parseDuration,
+  type Duration,
+  type InteractionDeclaration,
+  type InteractionRequest,
+  type InteractionResponse,
+  type PauseCheck,
+  type PauseKind,
+  type Resolver,
+  type Suspended,
+} from './pause.js';
+
+export { parkedCount, resume } from './session.js';
+
+export {
   Branch,
   Flow,
+  interactionsOf,
+  isAttended,
   type Accessor,
   type ActionStep,
   type AnswerOf,
@@ -110,6 +134,10 @@ export {
   type FlowOptions,
   type InputOf,
   type OutcomeDeclaration,
+  type PauseForInputOptions,
+  type PauseOptions,
+  type PauseStep,
+  type PauseUntilOptions,
   type Step,
   type StepOptions,
 } from './flow.js';

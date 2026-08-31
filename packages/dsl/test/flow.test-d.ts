@@ -107,3 +107,40 @@ new Flow({ id: 'accessors', input: inputFields }).fillForm([css('#u')], (i) => {
   expectTypeOf(i).toEqualTypeOf<InputOf<typeof flow>>();
   return i.username;
 });
+
+/**
+ * What `.pauseForInput()` obtained is accumulated the same way, and reaches
+ * later accessors as their second argument.
+ *
+ * The same phantom hazard applies: `P` appears only in parameter positions, so
+ * the compiler would accept `.pauseForInput()` being "simplified" to return
+ * `this`, and the obtained values would silently stop accumulating.
+ */
+new Flow({ id: 'obtains', input: inputFields })
+  .pauseForInput('mfaCode', { prompt: 'Enter the 6-digit code' })
+  .pauseForInput('siteKey', { prompt: 'Enter the site key' })
+  .fillForm([css('#mfa')], (i, got) => {
+    // Both values, each a `Secret` — a value asked for mid-run has never been
+    // through the field declarations, so nothing else would redact it.
+    expectTypeOf(got).toEqualTypeOf<{
+      mfaCode: import('@interfacer/dsl').Secret;
+      siteKey: import('@interfacer/dsl').Secret;
+    }>();
+    expectTypeOf(i).toEqualTypeOf<InputOf<typeof flow>>();
+    return got.mfaCode;
+  });
+
+// A flow that never asks obtains nothing, and an accessor written against the
+// input alone is unaffected by any of this.
+new Flow({ id: 'obtains-nothing', input: inputFields }).fillForm([css('#u')], (_i, got) => {
+  expectTypeOf(got).toEqualTypeOf<object>();
+  return 'literal';
+});
+
+// A pause does not widen the answer union: `suspended` is a control state the
+// master function's overloads carry, not an arm the flow declares.
+const paused = new Flow({ id: 'paused', input: inputFields })
+  .pauseForApproval('Send it?')
+  .returns(() => ({ status: 'ok' as const }));
+
+expectTypeOf<AnswerOf<typeof paused>>().toEqualTypeOf<{ status: 'ok' }>();

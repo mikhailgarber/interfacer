@@ -108,7 +108,20 @@ export type EntryBody =
   | { readonly kind: 'checkpoint'; readonly satisfied: boolean }
   | { readonly kind: 'outcome.matched'; readonly detectorIndex: number; readonly status: string }
   | { readonly kind: 'retry'; readonly reason: string; readonly attempt: number }
-  | { readonly kind: 'pause'; readonly reason: PauseReason; readonly name?: string }
+  | {
+      readonly kind: 'pause';
+      readonly reason: PauseReason;
+      readonly name?: string;
+      /**
+       * A pause named in the flow is part of the contract, not an incident: MFA
+       * on every login is expected, and a capability that declares it is simply
+       * attended rather than broken. Only an undeclared pause is an escalation,
+       * which during replay cannot happen — the DSL is the only way to pause.
+       */
+      readonly declared: boolean;
+      /** ISO-8601. Every pause is bounded, and this is the bound. */
+      readonly expiresAt: string;
+    }
   | {
       readonly kind: 'resume';
       readonly reason: PauseReason;

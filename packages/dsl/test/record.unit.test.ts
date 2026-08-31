@@ -51,7 +51,12 @@ describe('the envelope', () => {
     const entries = factory();
 
     const approval = entries.entry(
-      { kind: 'pause', reason: 'awaiting-decision' },
+      {
+        kind: 'pause',
+        reason: 'awaiting-decision',
+        declared: true,
+        expiresAt: '2026-01-01T00:05:00.000Z',
+      },
       'transfer.commit',
     );
     const effect = entries.entry(

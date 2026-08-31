@@ -24,11 +24,34 @@
    answer union to its success arm. `flow.test-d.ts` is what catches it. */
 import type { HostPattern } from './allowlist.js';
 import type { FieldSet, Infer } from './fields.js';
+import {
+  DEFAULT_INTERACTION_BOUND_MS,
+  DEFAULT_SURFACE_BOUND_MS,
+  parseDuration,
+  type Duration,
+  type InteractionDeclaration,
+  type PauseKind,
+} from './pause.js';
 import type { Secret } from './secret.js';
 import { describeTarget, type TargetChain } from './target.js';
 
-/** Values are taken as accessors on the input, so a flow is parameterized by construction. */
-export type Accessor<I, T> = (input: I) => T;
+/**
+ * Values are taken as accessors, so a flow is parameterized by construction and
+ * embeds no live value.
+ *
+ * The second argument is what `.pauseForInput()` has obtained so far. It is a
+ * second argument rather than a merge into the input because the two have
+ * different provenance and different rules: `I` is the declared contract, known
+ * before the run starts and projected into the CLI parser and the MCP schema,
+ * while `P` is asked for mid-run and has never been through a field
+ * declaration. Folding them together would let an MFA code look like a declared
+ * parameter, and a declared parameter look like something a human will be asked
+ * for.
+ *
+ * Every accessor written against the input alone — `i => i.username` — remains
+ * valid unchanged, because a function may ignore arguments it is passed.
+ */
+export type Accessor<I, P, T> = (input: I, obtained: P) => T;
 
 /**
  * Flatten an intersection into a plain object type.
@@ -49,18 +72,44 @@ export type ActionStep =
       readonly kind: 'fillForm';
       readonly id: string;
       readonly target: TargetChain;
-      readonly value: Accessor<never, FillValue>;
+      readonly value: Accessor<never, never, FillValue>;
     }
   | { readonly kind: 'pressButton'; readonly id: string; readonly target: TargetChain }
   | {
       readonly kind: 'choose';
       readonly id: string;
       readonly target: TargetChain;
-      readonly value: Accessor<never, string>;
+      readonly value: Accessor<never, never, string>;
+    };
+
+/**
+ * A bounded suspension.
+ *
+ * Waiting and human escalation are the same primitive — suspend, let something
+ * outside the flow change the world, resume after re-checking a precondition —
+ * and they differ only in the resolver. `pauseUntil` is resolved by polling and
+ * so carries a target; the other three are resolved by a human and so carry a
+ * prompt. They are one step kind for that reason: a caller's policy about being
+ * asked lives in one place rather than three.
+ */
+export type PauseStep =
+  | {
+      readonly kind: 'pauseUntil';
+      readonly id: string;
+      readonly target: TargetChain;
+      readonly withinMs: number;
+    }
+  | {
+      readonly kind: 'pause';
+      readonly id: string;
+      readonly pauseKind: PauseKind;
+      readonly name: string;
+      readonly prompt: string;
+      readonly withinMs: number;
     };
 
 export type Step =
-  | { readonly kind: 'open'; readonly id: string; readonly url: Accessor<never, string> }
+  | { readonly kind: 'open'; readonly id: string; readonly url: Accessor<never, never, string> }
   | ActionStep
   /** A `.pressButton()` understood to be irreversible. Never retried. */
   | { readonly kind: 'commit'; readonly id: string; readonly target: TargetChain }
@@ -87,13 +136,14 @@ export type Step =
         readonly when: TargetChain;
         readonly steps: readonly ActionStep[];
       }[];
-    };
+    }
+  | PauseStep;
 
 /** A declared business outcome: a legitimate answer, returned rather than thrown. */
 export interface OutcomeDeclaration {
   readonly id: string;
   readonly detector: TargetChain;
-  readonly map: Accessor<never, unknown>;
+  readonly map: Accessor<never, never, unknown>;
 }
 
 export interface StepOptions {
@@ -107,6 +157,22 @@ export interface StepOptions {
    * by hand.
    */
   readonly id?: string;
+}
+
+/**
+ * Every pause is bounded, so an escalation nobody answers becomes a hard failure
+ * with evidence rather than a hang. `within` is that bound; omitting it takes a
+ * default rather than leaving the pause unbounded.
+ */
+export interface PauseOptions extends StepOptions {
+  readonly within?: Duration;
+}
+
+export type PauseUntilOptions = PauseOptions;
+
+export interface PauseForInputOptions extends PauseOptions {
+  /** What the human is asked. Authored, so it carries no page data. */
+  readonly prompt: string;
 }
 
 export interface FlowOptions<I extends FieldSet> {
@@ -124,8 +190,14 @@ export interface FlowOptions<I extends FieldSet> {
   readonly allowlist?: readonly HostPattern[];
 }
 
-/** A sub-builder for the steps inside an `.optional()` or a `.oneOf()` arm. */
-export class Branch<I extends FieldSet> {
+/**
+ * A sub-builder for the steps inside an `.optional()` or a `.oneOf()` arm.
+ *
+ * `P` is what `.pauseForInput()` had obtained at the point the branch was
+ * written, so an arm can spend a value asked for earlier but cannot see one
+ * asked for after it.
+ */
+export class Branch<I extends FieldSet, P extends object = object> {
   readonly #steps: ActionStep[] = [];
   readonly #owner: Flow<I>;
 
@@ -139,7 +211,7 @@ export class Branch<I extends FieldSet> {
 
   fillForm(
     target: TargetChain,
-    value: Accessor<Infer<I>, FillValue>,
+    value: Accessor<Infer<I>, P, FillValue>,
     options: StepOptions = {},
   ): this {
     this.#steps.push({
@@ -160,7 +232,11 @@ export class Branch<I extends FieldSet> {
     return this;
   }
 
-  choose(target: TargetChain, value: Accessor<Infer<I>, string>, options: StepOptions = {}): this {
+  choose(
+    target: TargetChain,
+    value: Accessor<Infer<I>, P, string>,
+    options: StepOptions = {},
+  ): this {
     this.#steps.push({
       kind: 'choose',
       id: this.#owner.stepId('choose', target, options),
@@ -192,7 +268,12 @@ export class Branch<I extends FieldSet> {
  * even though nothing in the implementation needs them; `flow.test-d.ts` is what
  * fails if they are lost.
  */
-export class Flow<I extends FieldSet, A = never, E extends object = object> {
+export class Flow<
+  I extends FieldSet,
+  A = never,
+  E extends object = object,
+  P extends object = object,
+> {
   readonly id: string;
   readonly input: I;
   readonly declaredAllowlist: readonly HostPattern[];
@@ -200,7 +281,8 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
   readonly #steps: Step[] = [];
   readonly #outcomes: OutcomeDeclaration[] = [];
   readonly #usedIds = new Set<string>();
-  #result: Accessor<never, unknown> | undefined;
+  readonly #obtainedNames = new Set<string>();
+  #result: Accessor<never, never, unknown> | undefined;
 
   constructor(options: FlowOptions<I>) {
     this.id = options.id;
@@ -217,7 +299,7 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
   }
 
   /** The `.returns()` mapper, absent until the flow declares one. */
-  get result(): Accessor<never, unknown> | undefined {
+  get result(): Accessor<never, never, unknown> | undefined {
     return this.#result;
   }
 
@@ -249,7 +331,7 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
   }
 
   /** Go to an entry point. Allowlist-checked on the resolved URL. */
-  open(url: Accessor<Infer<I>, string>, options: StepOptions = {}): this {
+  open(url: Accessor<Infer<I>, P, string>, options: StepOptions = {}): this {
     return this.#push({
       kind: 'open',
       id: this.stepId('open', undefined, options),
@@ -259,7 +341,7 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
 
   fillForm(
     target: TargetChain,
-    value: Accessor<Infer<I>, FillValue>,
+    value: Accessor<Infer<I>, P, FillValue>,
     options: StepOptions = {},
   ): this {
     return this.#push({
@@ -292,7 +374,11 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
     return this.#push({ kind: 'commit', id: this.stepId('commit', target, options), target });
   }
 
-  choose(target: TargetChain, value: Accessor<Infer<I>, string>, options: StepOptions = {}): this {
+  choose(
+    target: TargetChain,
+    value: Accessor<Infer<I>, P, string>,
+    options: StepOptions = {},
+  ): this {
     return this.#push({
       kind: 'choose',
       id: this.stepId('choose', target, options),
@@ -316,7 +402,7 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
     target: TargetChain,
     parse: (text: string) => T,
     options: StepOptions = {},
-  ): Flow<I, A, Simplify<E & Record<N, T>>> {
+  ): Flow<I, A, Simplify<E & Record<N, T>>, P> {
     this.#push({
       kind: 'extract',
       id: this.stepId('extract', target, options),
@@ -324,16 +410,107 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
       target,
       parse: parse,
     });
-    return this as unknown as Flow<I, A, Simplify<E & Record<N, T>>>;
+    return this as unknown as Flow<I, A, Simplify<E & Record<N, T>>, P>;
+  }
+
+  /**
+   * Wait for a predicate, with a bound. Never a sleep.
+   *
+   * `.wait(2000)` cannot distinguish "loaded in 200ms" from "never loaded"; a
+   * predicate can. The bound only ever says how long the predicate may stay
+   * false, which is what keeps "slow" and "broken" separable.
+   *
+   * Resolved by polling rather than by a human, so it raises no
+   * `InteractionRequest`, appears in no `interactions` declaration, and cannot
+   * make a capability attended. Its expiry goes round the ordinary verification
+   * ladder — retry, then the declared detectors, then a hard failure — because a
+   * surface that never arrived is exactly the condition an outcome detector may
+   * legitimately explain.
+   */
+  pauseUntil(target: TargetChain, options: PauseUntilOptions = {}): this {
+    return this.#push({
+      kind: 'pauseUntil',
+      id: this.stepId('pauseUntil', target, options),
+      target,
+      withinMs: parseDuration(options.within ?? DEFAULT_SURFACE_BOUND_MS),
+    });
+  }
+
+  /**
+   * Ask a human for a value that cannot be known in advance — MFA, a one-time
+   * token.
+   *
+   * The answer is bound under `name` and read by later accessors as their second
+   * argument, so it is spent the same way an input is: `(i, got) => got.mfaCode`.
+   * It arrives as a `Secret`, because a value obtained mid-run has never been
+   * through the field declarations and nothing else would redact it.
+   */
+  pauseForInput<N extends string>(
+    name: N,
+    options: PauseForInputOptions,
+  ): Flow<I, A, E, Simplify<P & Record<N, Secret>>> {
+    if (this.#obtainedNames.has(name)) {
+      throw new Error(`duplicate obtained value ${JSON.stringify(name)} in flow ${this.id}`);
+    }
+    this.#obtainedNames.add(name);
+
+    this.#push({
+      kind: 'pause',
+      id: this.stepId(`pauseForInput:${name}`, undefined, options),
+      pauseKind: 'input',
+      name,
+      prompt: options.prompt,
+      withinMs: parseDuration(options.within ?? DEFAULT_INTERACTION_BOUND_MS),
+    });
+    return this as unknown as Flow<I, A, E, Simplify<P & Record<N, Secret>>>;
+  }
+
+  /**
+   * Ask a human to authorize a risky or irreversible step.
+   *
+   * A refusal ends the run, and so does an unanswered bound: an approval that
+   * expires is treated as a deny, because silence is not consent.
+   */
+  pauseForApproval(prompt: string, options: PauseOptions = {}): this {
+    const id = this.stepId('pauseForApproval', undefined, options);
+    return this.#push({
+      kind: 'pause',
+      id,
+      pauseKind: 'approval',
+      name: id,
+      prompt,
+      withinMs: parseDuration(options.within ?? DEFAULT_INTERACTION_BOUND_MS),
+    });
+  }
+
+  /**
+   * Hand the live session to a human — an unexpected dialog, an uncovered
+   * screen.
+   *
+   * The flow stops driving the browser; the human uses that same window and
+   * signals when they are done. Because a human has touched the session, resume
+   * re-asserts the last checkpoint that passed rather than assuming where the
+   * flow now is.
+   */
+  pauseForOperator(reason: string, options: PauseOptions = {}): this {
+    const id = this.stepId('pauseForOperator', undefined, options);
+    return this.#push({
+      kind: 'pause',
+      id,
+      pauseKind: 'operator',
+      name: id,
+      prompt: reason,
+      withinMs: parseDuration(options.within ?? DEFAULT_INTERACTION_BOUND_MS),
+    });
   }
 
   /** Run a step only if the target resolves. A no-op when it does not. */
   optional(
     target: TargetChain,
-    build: (branch: Branch<I>) => void,
+    build: (branch: Branch<I, P>) => void,
     options: StepOptions = {},
   ): this {
-    const branch = new Branch<I>(this);
+    const branch = new Branch<I, P>(this);
     build(branch);
     return this.#push({
       kind: 'optional',
@@ -352,14 +529,14 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
    * whichever arm happened to run.
    */
   oneOf(
-    arms: readonly { when: TargetChain; then: (branch: Branch<I>) => void }[],
+    arms: readonly { when: TargetChain; then: (branch: Branch<I, P>) => void }[],
     options: StepOptions = {},
   ): this {
     return this.#push({
       kind: 'oneOf',
       id: this.stepId('oneOf', arms[0]?.when, options),
       arms: arms.map((arm) => {
-        const branch = new Branch<I>(this);
+        const branch = new Branch<I, P>(this);
         arm.then(branch);
         return { when: arm.when, steps: branch.steps };
       }),
@@ -375,9 +552,9 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
    */
   outcome<O>(
     detector: TargetChain,
-    map: Accessor<Infer<I>, O>,
+    map: Accessor<Infer<I>, P, O>,
     options: StepOptions = {},
-  ): Flow<I, A | O, E> {
+  ): Flow<I, A | O, E, P> {
     this.#outcomes.push({
       id: this.stepId('outcome', detector, options),
       detector,
@@ -386,7 +563,7 @@ export class Flow<I extends FieldSet, A = never, E extends object = object> {
     return this;
   }
 
-  returns<R>(map: (extracted: E) => R): Flow<I, A | R, E> {
+  returns<R>(map: (extracted: E) => R): Flow<I, A | R, E, P> {
     if (this.#result !== undefined) {
       throw new Error(`flow ${this.id} already declares a result`);
     }
@@ -400,3 +577,43 @@ export type AnswerOf<F> = F extends Flow<FieldSet, infer A> ? A : never;
 
 /** The input object a flow requires. */
 export type InputOf<F> = F extends Flow<infer I, unknown> ? Infer<I> : never;
+
+/**
+ * The pauses a capability declares, keyed by name.
+ *
+ * Published alongside the contract, so a caller knows before invoking that this
+ * capability will stop and ask. Projected from the steps rather than declared
+ * separately, for the same reason the answer union is: a second declaration
+ * would be free to disagree with the flow, and nothing would catch it.
+ */
+export function interactionsOf(
+  flow: Flow<FieldSet, unknown>,
+): Readonly<Record<string, InteractionDeclaration>> {
+  const declarations: Record<string, InteractionDeclaration> = {};
+
+  for (const step of flow.steps) {
+    if (step.kind === 'pause') {
+      declarations[step.name] = {
+        kind: step.pauseKind,
+        name: step.name,
+        prompt: step.prompt,
+        // Every value asked for mid-run is a secret: it has never been through
+        // the field declarations, so nothing else would redact it.
+        secret: step.pauseKind === 'input',
+      };
+    }
+  }
+
+  return Object.freeze(declarations);
+}
+
+/**
+ * Whether a capability needs an attended session.
+ *
+ * Not declared separately, deliberately: it is whether `interactions` is
+ * non-empty. Declaring both would let a capability announce an MFA pause and
+ * claim to run unattended, and nothing would catch the contradiction.
+ */
+export function isAttended(flow: Flow<FieldSet, unknown>): boolean {
+  return Object.keys(interactionsOf(flow)).length > 0;
+}

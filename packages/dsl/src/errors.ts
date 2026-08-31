@@ -71,6 +71,52 @@ export class SurfaceUnavailable extends ReplayError {}
 export class SessionExpired extends ReplayError {}
 
 /**
+ * A bounded pause elapsed with nobody answering.
+ *
+ * Every pause is bounded, so an escalation nobody answers becomes a hard failure
+ * with evidence rather than a hang. Used for `awaiting-surface`,
+ * `awaiting-input` and `awaiting-action`; an unanswered approval is an
+ * {@link ApprovalDenied} instead, because silence is not consent.
+ */
+export class PauseExpired extends ReplayError {}
+
+/**
+ * An approval was refused, or went unanswered until its bound elapsed.
+ *
+ * Expiry and refusal are the same class deliberately: the design says an
+ * approval that expires is *treated as a deny*, and giving silence its own error
+ * would invite a caller to handle it as something other than a refusal.
+ */
+export class ApprovalDenied extends ReplayError {}
+
+/**
+ * A resolver answered with something the kind it was asked did not admit.
+ *
+ * One `Resolver` serves every kind, so the response type cannot be tied to the
+ * request kind at compile time. This is the runtime check that buys that back.
+ */
+export class InteractionFailed extends ReplayError {}
+
+/**
+ * `resume` was called with an id that names no parked run.
+ *
+ * Not a {@link ReplayError}: there is no run to attribute it to. It is either a
+ * second `resume` on an id — resume is single-shot — or an id whose run has
+ * already finished, expired, or belonged to a different process. Parked runs are
+ * held in memory beside a live browser, so an id is a handle to a process rather
+ * than a key anybody else could look up.
+ */
+export class UnknownSession extends Error {
+  readonly sessionId: string;
+
+  constructor(sessionId: string) {
+    super(`no parked run for session ${JSON.stringify(sessionId)}`);
+    this.name = new.target.name;
+    this.sessionId = sessionId;
+  }
+}
+
+/**
  * Exported because TypeScript types a `catch` binding as `unknown` and has no
  * `throws` clause. Without the guard, consumers lose the typing at the one place
  * they need it.
