@@ -11,6 +11,7 @@ import { checkAllowlist } from '@interfacer/dsl';
 
 const ALLOWLIST = ['mybank.com', '*.mybank.com', 'sso.identity.example'];
 
+// @covers allowlist.host-patterns
 describe('checkAllowlist', () => {
   describe('admits', () => {
     it.each([

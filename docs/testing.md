@@ -219,6 +219,63 @@ from. A stale build therefore measures stale code.
 resolutions and the same result; a retry would mask exactly the nondeterminism
 that test exists to catch. Raising it is a design decision, not a flake remedy.
 
+## coverage
+
+Two reports, answering different questions.
+
+### line coverage
+
+```sh
+npm run coverage    # the four free tiers, with a report
+```
+
+Reports land in `coverage/` (gitignored): a terminal summary, a browsable
+`index.html`, and `lcov.info` for tooling. The e2e tier is left out because it
+costs money to run.
+
+Two files are excluded. `fixtures/src/serve.ts` is exercised by
+`serve.fixtures.test.ts`, which spawns it as a child process — v8 coverage in this
+process cannot see another one, so it is tested but unmeasurable from here.
+`packages/interfacer/src/cli.ts` is a not-implemented stub until Phase 9.
+
+### design-claim coverage
+
+```sh
+npm run claims
+```
+
+Line coverage says whether code ran. It cannot say whether the suite verifies what
+the design claims — a module can sit at 100% and prove nothing, and the properties
+this design turns on are claims about behaviour.
+
+So the design's claims are enumerated in `test/claims.ts`, tests declare which ones
+they exercise with a `@covers <id>` comment, and the report joins the two. Each
+claim carries the implementation-plan phase that should verify it, so the report
+distinguishes a claim that is **pending** from one that is a **gap**:
+
+```
+phase 0    1/1
+phase 1   12/12
+phase 2    1/1
+phase 3   31/37   <- incomplete
+phase 4    0/8    <- incomplete
+...
+45/93 claims covered.
+```
+
+An uncovered claim from a phase already delivered is the number worth looking at.
+One from a later phase is simply not built yet.
+
+`claims.unit.test.ts` keeps the registry honest — it fails on a `@covers` naming an
+id that does not exist, so renaming or dropping a claim cannot leave a test quietly
+asserting coverage of nothing. It deliberately does **not** fail on an uncovered
+claim: most of the design is unbuilt, and a gate that went red for unwritten phases
+would be switched off within a week.
+
+What it cannot check is its own completeness. The registry is written by hand from
+`docs/design-requirements.md`, and a claim nobody wrote down is a claim nobody will
+notice is untested — so read it against the design whenever the design changes.
+
 ## not yet decided
 
 The runner config is the tier/location mapping and timeouts. These are real
@@ -230,8 +287,6 @@ settled:
   declared interstitial, which today is spelled `.optional()` in the flow rather
   than handled by the engine. Whether those should be the same mechanism is
   unsettled. *(Phase 4)*
-- **Coverage** — not configured, and not obviously the right measure for a suite
-  whose claims are properties rather than lines.
 - **Frame traversal** — `hostile` serves a help panel inside an `<iframe>`, and
   the design says nothing about whether the engine resolves a target across a
   document boundary. The frame is deliberately off the critical path, so every

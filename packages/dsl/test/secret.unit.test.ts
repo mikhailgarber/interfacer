@@ -14,6 +14,7 @@ import { isSecret, makeSecret, REDACTED } from '@interfacer/dsl';
 
 const SENTINEL = 'hunter2-Sentinel-Do-Not-Log';
 
+// @covers secrets.redaction-is-the-default contract.secret-is-a-runtime-marker
 describe('Secret', () => {
   it('reveals the value, but only when asked explicitly', () => {
     expect(makeSecret(SENTINEL).reveal()).toBe(SENTINEL);

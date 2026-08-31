@@ -18,6 +18,7 @@ function factory(): ReturnType<typeof createEntryFactory> {
   return createEntryFactory(CONTEXT, { now: fixedClock('2026-03-14T10:00:00.000Z') });
 }
 
+// @covers record.common-envelope
 describe('the envelope', () => {
   it('stamps every entry with the run, the capability and its version', () => {
     // One project is one capability, so the capability's version is the
@@ -201,6 +202,7 @@ describe('what an entry may carry', () => {
   });
 });
 
+// @covers record.same-format-both-phases
 describe('both phases produce the same format', () => {
   it('differs only in the phase stamped on the envelope', () => {
     const shared = { kind: 'checkpoint', satisfied: true } as const;

@@ -30,6 +30,50 @@ import { includeGlobs, typecheckGlobs } from './test/tiers.js';
  */
 export default defineConfig({
   test: {
+    coverage: {
+      // v8 rather than istanbul: no instrumentation pass, so the integration
+      // tier is not slowed further. It measures the Node process, which is where
+      // the engine runs — the browser is the thing being driven, not the thing
+      // under test.
+      provider: 'v8',
+      reporter: ['text-summary', 'html', 'lcov'],
+      reportsDirectory: 'coverage',
+
+      // Coverage is collected from `dist/` and reported against `src/`.
+      //
+      // That looks wrong and is not: tests import each package through its
+      // `exports` map, the same path a generated capability takes, so `dist/` is
+      // what actually executes. Pointing `include` at `src/` finds the files and
+      // attributes nothing to them. Naming the emitted JavaScript is what makes
+      // the provider read the emitted source maps, which is what puts the counts
+      // back on the TypeScript they came from — so the report reads in `.ts`
+      // even though the run did not.
+      //
+      // A consequence: `npm run build` has to precede coverage, and a stale
+      // build measures stale code.
+      include: ['packages/*/dist/**/*.js', 'fixtures/dist/**/*.js'],
+
+      exclude: [
+        // Exercised by `serve.fixtures.test.ts`, which spawns it as a child
+        // process — and v8 coverage in this process cannot see another one. It
+        // is tested; it is only unmeasurable from here.
+        '**/dist/serve.js',
+        // A not-implemented stub until Phase 9.
+        '**/dist/cli.js',
+      ],
+    },
+
+    // The workspace packages resolve through `node_modules` symlinks, so Vite
+    // treats them as external dependencies and hands them straight to Node —
+    // where the coverage provider never sees them. Inlining makes Vite process
+    // them, which is what lets v8's counts be mapped back through the emitted
+    // source maps onto the TypeScript they came from.
+    server: {
+      deps: {
+        inline: [/@interfacer\//, /^interfacer$/],
+      },
+    },
+
     // Pinned, not defaulted. Phase 3 asserts that replaying one flow N times
     // produces the same steps, the same resolutions and the same result — a
     // retry here would mask exactly the nondeterminism that test exists to

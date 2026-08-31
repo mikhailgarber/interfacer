@@ -23,6 +23,7 @@ const inputFields = fields({
   accountRef: text({ description: 'account to look up' }),
 });
 
+// @covers contract.one-declaration-many-readers
 describe('fields', () => {
   it('keeps the declaration readable at run time', () => {
     // The reason the declaration is a value at all: an interface is erased and
@@ -61,6 +62,7 @@ describe('fields', () => {
   });
 });
 
+// @covers contract.secret-is-a-runtime-marker
 describe('secretFieldNames', () => {
   it('names the fields the CLI must refuse on argv and the record must redact', () => {
     // Read from the declaration, not from supplied values, so a field declared

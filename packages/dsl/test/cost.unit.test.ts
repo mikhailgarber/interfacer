@@ -18,6 +18,7 @@ const RATES: ModelRates = {
   cacheWritePerMTok: 20,
 };
 
+// @covers agent.spend-counts-cache-rates
 describe('costOf', () => {
   it('charges each input class at its own rate', () => {
     // The whole point of tracking the classes separately: discovery resends

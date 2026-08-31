@@ -109,6 +109,7 @@ describe('rebranded preserves clean structure', () => {
   });
 });
 
+// @covers tenant.structure-forks
 describe('skewed diverges structurally', () => {
   it('does not preserve the detail screen', async () => {
     const [clean, skewed] = await Promise.all([

@@ -13,6 +13,7 @@ import {
   type TargetChain,
 } from '@interfacer/dsl';
 
+// @covers scope.target-names-own-strategy
 describe('Target', () => {
   it('names its own strategy rather than being an opaque selector', () => {
     // The whole abstraction that keeps other surfaces reachable: a recorded flow
@@ -33,6 +34,7 @@ describe('Target', () => {
   });
 });
 
+// @covers target.preference-order target.chain-recorded-best-first
 describe('strategy preference', () => {
   it('ranks what a control is above where it sits', () => {
     // `role` and `label` describe what a control is and what an operator calls
@@ -78,6 +80,7 @@ describe('strategy preference', () => {
   });
 });
 
+// @covers target.alternatives-for-names-only
 describe('accessible names', () => {
   it('admits alternatives for a role name', () => {
     // One institution says "Member" where another says "Customer". This absorbs

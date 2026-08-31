@@ -8,6 +8,7 @@ import { packageName, targetStrategyPreference } from 'interfacer';
  * `decide(state, tools)` — step appending, cost accounting, stall detection,
  * budget exhaustion, and the between-turns allowlist check.
  */
+// @covers components.one-way-dependencies
 describe('interfacer scaffold', () => {
   it('resolves as a workspace package', () => {
     expect(packageName).toBe('interfacer');

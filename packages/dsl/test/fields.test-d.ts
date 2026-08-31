@@ -21,6 +21,7 @@ const inputFields = fields({
 
 type Input = Infer<typeof inputFields>;
 
+// @covers contract.input-type-inferred position.contract-in-types
 // The shape the design's worked example specifies, exactly.
 expectTypeOf<Input>().toEqualTypeOf<{
   url: string;

@@ -62,6 +62,7 @@ function describeInput(input: VerificationInput): string {
   return JSON.stringify(input);
 }
 
+// @covers execution.recovery-before-judgement execution.outcomes-before-failure
 describe('decideVerification', () => {
   const inputs = everyInput();
 
