@@ -31,7 +31,11 @@ default gate by accident.
   condition on demand. See **the fixtures** below.
 - **`integration`** — real browser, real fixture, no model. This is where the
   production path is proved: determinism, verification order, targeting and
-  fallback drift, retry gating, allowlist enforcement, pauses, redaction.
+  fallback drift, retry gating, allowlist enforcement, pauses, redaction. Tests
+  author a `Flow` (see `packages/dsl/test/flows.ts`) and hand it to the engine.
+  It is by far the slowest tier that runs on every `verify` — around 65 seconds,
+  most of it spent waiting out targets that are genuinely absent, which is the
+  cost of the tests that prove a failure fails.
 - **`agent`** — real browser, real fixture, scripted `decide(state, tools)`. Tests
   Interfacer's loop rather than the model: step appending, cost accounting, stall
   detection, budget exhaustion, and the between-turns allowlist check. It is also
@@ -203,6 +207,13 @@ and closed in an `afterAll`. Not a `globalSetup`: files run in parallel workers,
 per-file servers on OS-assigned ports cannot collide on a port or share a session
 store with each other — or with a fixture somebody has open in a browser.
 
+**Coverage is collected from `dist/` and reported against `src/`.** That looks
+wrong and is not: tests import each package through its `exports` map, so `dist/`
+is what executes. Pointing `include` at `src/` finds the files and attributes
+nothing to them — naming the emitted JavaScript is what makes the provider read
+the emitted source maps, which puts the counts back on the TypeScript they came
+from. A stale build therefore measures stale code.
+
 **Retries are pinned to zero** in `vitest.config.ts`, not left to a default. Phase
 3 asserts that replaying one flow N times produces the same steps, the same
 resolutions and the same result; a retry would mask exactly the nondeterminism
@@ -214,6 +225,13 @@ The runner config is the tier/location mapping and timeouts. These are real
 decisions that nothing has made yet, listed here so they are not mistaken for
 settled:
 
+- **Recovery beyond retry** — the first rung of the verification ladder is
+  currently "wait and try the step again". The design also names dismissing a
+  declared interstitial, which today is spelled `.optional()` in the flow rather
+  than handled by the engine. Whether those should be the same mechanism is
+  unsettled. *(Phase 4)*
+- **Coverage** — not configured, and not obviously the right measure for a suite
+  whose claims are properties rather than lines.
 - **Frame traversal** — `hostile` serves a help panel inside an `<iframe>`, and
   the design says nothing about whether the engine resolves a target across a
   document boundary. The frame is deliberately off the critical path, so every
@@ -230,5 +248,3 @@ settled:
 - **Spend guard for `e2e`** — the tier currently skips when `API_KEY` is absent.
   Skipping is right for a scaffold and wrong for a release gate, which should say
   it could not run rather than report green. *(Phase 10)*
-- **Coverage** — not configured, and not obviously the right measure for a suite
-  whose claims are properties rather than lines.

@@ -54,10 +54,24 @@ function heading(text: string): string {
   return `<div class="css-8f0e2d">${escape(text)}</div>`;
 }
 
-function labelled(id: string, visible: string, name: string, type = 'text', value = ''): string {
+/**
+ * `announce` overrides the visible label, the way a bolted-on accessibility fix
+ * does. Omitting it leaves the `<label>` as the accessible name — which is what
+ * makes two fields labelled "ID" genuinely ambiguous rather than merely
+ * ambiguous-looking.
+ */
+function labelled(
+  id: string,
+  visible: string,
+  name: string,
+  type = 'text',
+  value = '',
+  announce = true,
+): string {
+  const label = announce ? ` aria-label="${escape(name)}"` : '';
   return [
     `<tr><td class="css-b41c7a"><label for="${id}">${escape(visible)}</label></td>`,
-    `<td><input class="css-3e9a7f" id="${id}" name="${name}" type="${type}" value="${escape(value)}" aria-label="${escape(name)}"></td></tr>`,
+    `<td><input class="css-3e9a7f" id="${id}" name="${name}" type="${type}" value="${escape(value)}"${label}></td></tr>`,
   ].join('\n');
 }
 
@@ -107,8 +121,8 @@ function body(page: Screen): string {
           heading('Find an account'),
           '<form method="get" action="/account"><table>',
           // Two fields, one label. `byLabel('ID')` is ambiguous here by design.
-          labelled('s_1', 'ID', 'ref'),
-          labelled('s_2', 'ID', 'branch'),
+          labelled('s_1', 'ID', 'ref', 'text', '', false),
+          labelled('s_2', 'ID', 'branch', 'text', '', false),
           '</table>',
           mismatchedButton('Look up', 'Search accounts'),
           '</form>',

@@ -37,17 +37,21 @@ an API key.
 
 ## status
 
-Phase 2 of the implementation plan.
+Phase 3 of the implementation plan. **A capability can now be replayed.**
 
 `@interfacer/dsl` carries the contract and the pure primitives — `Secret`,
 `fields()`/`Infer`, `Target`, the allowlist matcher, cost accounting, run-record entry
-construction, and the verification-order function.
+construction, and the verification-order function — plus the `Flow` builder and the
+execution engine: target resolution through the strategy chain with drift reporting,
+the recover/outcome/fail ladder, per-step retry gating, allowlist enforcement on the
+resolved URL, the three endings, and the run record as JSON lines.
 
 `fixtures` carries the five applications everything above the unit tier is proved
 against, each serving a login, a search, a detail screen and a multi-field action with
 a confirmation step, and each able to produce every exceptional condition on demand.
 
-The `Flow` builder, the execution engine and the agent loop are not built yet.
+Not built yet: the pause primitives and parked runs (Phase 4), attachments and
+`dataClasses` (Phase 5), the project generator (Phase 7), and the agent loop (Phase 8).
 
 ## working on it
 

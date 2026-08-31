@@ -88,3 +88,32 @@ export {
   type VerificationDecision,
   type VerificationInput,
 } from './verification.js';
+
+export {
+  CheckpointFailed,
+  isReplayError,
+  NavigationBlocked,
+  ReplayError,
+  SessionExpired,
+  SurfaceUnavailable,
+  TargetAmbiguous,
+  type ReplayErrorDetail,
+} from './errors.js';
+
+export {
+  Branch,
+  Flow,
+  type Accessor,
+  type ActionStep,
+  type AnswerOf,
+  type FillValue,
+  type FlowOptions,
+  type InputOf,
+  type OutcomeDeclaration,
+  type Step,
+  type StepOptions,
+} from './flow.js';
+
+export { isDrift, resolveTarget, type Arity, type Resolution } from './resolve.js';
+
+export { runFlow, type RunOptions } from './engine.js';
