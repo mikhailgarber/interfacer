@@ -9,7 +9,7 @@
  * - **Phase 7** — the project generator (below).
  * - **Phase 8** — the agent loop and the single `decide(state, tools)` SDK seam
  *   (below).
- * - **Phase 9** — interview mode and the CLI's location resolution.
+ * - **Phase 9** — interview mode and the CLI's location resolution (below).
  * - **Phase 10** — generation mode and seeded discovery.
  */
 import { STRATEGY_PREFERENCE } from '@interfacer/dsl';
@@ -38,16 +38,68 @@ export {
   claude,
   credentials,
   DEFAULT_MODEL,
+  interviewer,
   MissingCredential,
   type ContractBrief,
+  type Converse,
+  type Credentials,
   type Decide,
   type DiscoveryState,
   type Exchange,
+  type InterviewState,
   type ToolCall,
   type ToolDefinition,
   type ToolResult,
   type Turn,
 } from './agent/decide.js';
+
+export {
+  gaps,
+  GUARDED,
+  IncompleteContract,
+  settle,
+  type AnswerPatch,
+  type Authority,
+  type Contract,
+  type ContractDraft,
+  type EffectsDraft,
+  type Gap,
+  type Guarded,
+  type InputAnswer,
+  type InteractionAnswer,
+  type OutcomeAnswer,
+} from './interview/contract.js';
+
+export { applyAnswers, cited, type Applied, type Authorization } from './interview/answers.js';
+
+export { accepted, type Ask, type Question } from './ask.js';
+
+export {
+  interview,
+  type InterviewEnding,
+  type InterviewOptions,
+  type InterviewResult,
+} from './interview/interview.js';
+
+export {
+  INTERVIEW_TOOL_NAMES,
+  INTERVIEW_TOOLS,
+  patchOf,
+  proposalOf,
+  type Proposal,
+} from './interview/tools.js';
+
+export { recordedAnswers } from './interview/read.js';
+
+export {
+  BadProjectName,
+  capabilityFrom,
+  resolveLocation,
+  type Location,
+  type LocationState,
+} from './interview/locate.js';
+
+export { BadInvocation, parseArgv, USAGE, type Invocation } from './interview/invoke.js';
 
 export { appendStep, answerFor, TOOLS, TOOL_NAMES, ToolArgumentError } from './agent/tools.js';
 

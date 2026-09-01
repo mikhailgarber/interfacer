@@ -26,6 +26,7 @@ import {
   secret,
   text,
   type Effects,
+  type HostPattern,
   type Infer,
   type VariantStamp,
 } from '@interfacer/dsl';
@@ -55,11 +56,14 @@ const LOOK_UP = [byRole('button', ['Look up', 'Find'])] as const;
 const ON_SEARCH_SCREEN = [byRole('heading', 'Find an account'), css('input[name="ref"]')] as const;
 const BALANCE = [css('#balance-value'), css('.balance')] as const;
 
-export function balanceCapability(effects?: Effects) {
+export function balanceCapability(
+  options: { readonly effects?: Effects; readonly allowlist?: readonly HostPattern[] } = {},
+) {
   return new Flow({
     id: 'checkAccountBalance',
     input: balanceInput,
-    ...(effects === undefined ? {} : { effects }),
+    ...(options.effects === undefined ? {} : { effects: options.effects }),
+    ...(options.allowlist === undefined ? {} : { allowlist: options.allowlist }),
   })
     .open(field('url'), { id: 'login.open' })
     .fillForm(USERNAME, field('username'), { id: 'login.username' })

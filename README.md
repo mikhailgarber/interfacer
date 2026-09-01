@@ -27,7 +27,7 @@ no model in the loop.
 | | what it is |
 | --- | --- |
 | `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, the execution engine, pause/resume, the evidence rules, and the effects a run refuses. The only runtime dependency a generated capability has. |
-| `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects; the generator and the discovery loop are the parts that exist. |
+| `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects; the CLI shell, the interview, the generator and the discovery loop are the parts that exist. |
 | `fixtures` | Five real HTTP applications served from the repo — `clean`, `legacy`, `hostile`, `rebranded`, `skewed` — differing in how hostile they are. Everything above the unit tier is proved against these rather than a public site. `npm run fixtures` starts them for a person to look at. |
 | `e2e` | The live-model tier. Tests only. |
 
@@ -37,11 +37,12 @@ an API key.
 
 ## status
 
-Phase 8 of the implementation plan. **A capability can be replayed, can stop to ask a
+Phase 9 of the implementation plan. **A capability can be replayed, can stop to ask a
 human without losing its place, is bounded in what it may write down about what it
 saw, is refused where its own declaration says it needs a human it never asks, can be
-written out as a complete Node project that builds and runs with nothing added — and
-can be discovered by a model driving the same engine that replays it.**
+written out as a complete Node project that builds and runs with nothing added, can be
+discovered by a model driving the same engine that replays it — and is commissioned in
+a conversation that settles its contract before anything is driven.**
 
 `@interfacer/dsl` carries the contract and the pure primitives — `Secret`,
 `fields()`/`Infer`, `Target`, the allowlist matcher, cost accounting, run-record entry
@@ -147,6 +148,9 @@ per verb, plus `snapshot`, `screenshot` and `ask`; calling one executes it and a
 the step **only if the application accepted it**, so the flow cannot drift from what
 happened. Each turn the model is given the accessibility tree — the same vocabulary its
 targets are written in — and a screenshot is a second tool that can never be a target.
+`ask` reaches the person in the session in prose, on the same channel the interview
+uses rather than the pause resolver a running capability answers on: a pause needs a
+value of a known kind, and a question does not have one.
 
 Every SDK call lives behind one `decide(state, tools)` function and nothing else
 imports the SDK, which a test checks by reading the source rather than by watching a
@@ -156,7 +160,46 @@ budget — told to the model as a ceiling and enforced by the harness, which is 
 one of the two that is a control — the stall guard, and a bound on turns for a provider
 that costs nothing and never finishes. The partial flow survives all of them.
 
-Not built yet: the interview (Phase 9) and generation mode (Phase 10).
+And it carries the interview, which is where a capability is commissioned. `npx
+interfacer <project-name> [--root <dir>] [--interview <path>]` resolves the location
+first — creating it, treating an empty one as a new project, and treating an occupied
+one as a project update — and checks `API_KEY` before any of it, so a missing key costs
+a second rather than an entire interview. The goal and the entry point are deliberately
+not arguments: a goal is a paragraph rather than a flag, and the interview has to
+interrogate it anyway to get the contract out of it.
+
+A model conducts the conversation; Interfacer decides what an answer is. An answer is
+present, absent, or an empty list — "this task has no business outcomes" is something a
+person said and "nobody asked yet" is not, and a run does not proceed on a question that
+was never put. The two effects questions are asked, the remaining dimensions are
+proposed, and **the allowlist and `securityEffect` are proposed rather than asked, so
+they are the two answers a model could quietly settle for itself.** It cannot: a
+guardrail enters the contract only where a person confirmed it in the conversation, or
+where the interview file states it and the model quotes the sentence that does — checked
+against the file, because a model that resolves its own constraints has not been
+constrained.
+
+`--interview <path>` supplies the answers as prose and takes the human out of the
+session. There is then nobody to ask and nobody to confirm, so an insufficient file
+exits listing exactly which answers are missing, and a proposal absent from the file is
+one of them rather than a silent accept. An unattended run with no budget is missing an
+answer like any other: there is no fallback, because a default nobody chose is not an
+authorization. The file is an input only and is never written back — there would be
+nothing to write that the project does not already hold, and a prose copy of the
+contract would drift the moment somebody edited the flow by hand.
+
+Which is also why a rerun is a delta rather than a repeat. The project's own
+declarations are the recorded answers, read from its source rather than from a sidecar
+or a build: `fields()`, `effects`, `interactions`, the confirmed allowlist, the outcomes
+the flow declares and the shape it returns. What is left to ask is usually the goal and
+the entry point a new tenant changes. Anything the reader cannot parse is absent rather
+than guessed, so an edited project asks one question too many instead of carrying an
+answer nobody gave.
+
+Not built yet: generation mode (Phase 10), where the session switches from settling the
+contract to discovering the flow against the live application and writing the project
+out. A run is one session with a human in it, and the conversation does not end when the
+interview does.
 
 ## working on it
 

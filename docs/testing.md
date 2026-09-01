@@ -17,12 +17,15 @@ tiers are ordered by what they are permitted to reach for.
 | `agent`       | yes     | fixture | scripted | `npm test`           |
 | `e2e`         | yes     | fixture | live     | `npm run test:e2e`   |
 
-`npm test` runs the first four. **What keeps a tier out of the gate is a live model,
-not a browser or a fixture.** A scripted `decide` is as deterministic and as free as a
-hand-written flow, so the agent tier gates on the same terms as `integration` — and it
-holds nine of the design's claims, which would otherwise be reported as covered by
-tests the gate never ran. Only `e2e` is invoked explicitly: it is slow,
-non-deterministic, and it costs money.
+`npm test` runs the first four. The columns say what a tier may reach for rather than
+what every test in it uses: the interview tests in the `agent` tier open no browser,
+because the contract is settled before anything is driven.
+
+**What keeps a tier out of the gate is a live model, not a browser or a fixture.** A
+scripted `decide` is as deterministic and as free as a hand-written flow, so the agent
+tier gates on the same terms as `integration` — and it holds fifteen of the design's
+claims, which would otherwise be reported as covered by tests the gate never ran. Only
+`e2e` is invoked explicitly: it is slow, non-deterministic, and it costs money.
 
 - **`unit`** — no browser, no app. What is genuinely pure: `Secret` redaction,
   allowlist matching against resolved URLs, cost accounting from `usage`,
@@ -46,7 +49,10 @@ non-deterministic, and it costs money.
   cost of the tests that prove a failure fails.
 - **`agent`** — real browser, real fixture, scripted `decide(state, tools)`. Tests
   Interfacer's loop rather than the model: step appending, cost accounting, stall
-  detection, budget exhaustion, and the between-turns allowlist check. It is also
+  detection, budget exhaustion, and the between-turns allowlist check. It also holds
+  the interview, conducted by a scripted `converse` against no browser at all: which
+  answers a patch may settle, what a guardrail proposal costs, what is reported
+  missing, and what a rerun against a generated project still has to ask. It is also
   the only practical way to test pathological behaviour, because a live model will
   not produce it on demand — a provider that never finishes, or one that follows an
   instruction it read on a page. The scripted `decide` is a fake: it returns
@@ -288,10 +294,13 @@ Reports land in `coverage/` (gitignored): a terminal summary, a browsable
 `index.html`, and `lcov.info` for tooling. The e2e tier is left out because it
 costs money to run.
 
-Two files are excluded. `fixtures/src/serve.ts` is exercised by
-`serve.fixtures.test.ts`, which spawns it as a child process — v8 coverage in this
-process cannot see another one, so it is tested but unmeasurable from here.
-`packages/interfacer/src/cli.ts` is a not-implemented stub until Phase 9.
+Two files are excluded, for the same reason. `fixtures/src/serve.ts` is exercised by
+`serve.fixtures.test.ts` and `packages/interfacer/src/cli.ts` by
+`interview.unit.test.ts`, both of which spawn the file as a child process — v8 coverage
+in this process cannot see another one, so they are tested but unmeasurable from here.
+The CLI is spawned rather than imported because a `bin` that runs on import is what is
+being checked: that `--help` prints the usage, that a bad invocation exits 2, and that a
+missing `API_KEY` exits before a location is resolved or a question asked.
 
 ### design-claim coverage
 

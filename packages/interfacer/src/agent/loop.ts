@@ -30,6 +30,7 @@ import {
   type TargetChain,
 } from '@interfacer/dsl';
 
+import type { Ask } from '../ask.js';
 import {
   DEFAULT_MODEL,
   type ContractBrief,
@@ -73,6 +74,15 @@ export interface DiscoveryOptions<I extends FieldSet = FieldSet> extends RunOpti
    */
   readonly input: Infer<I>;
   readonly decide: Decide;
+  /**
+   * The person in the session, asked in prose.
+   *
+   * Distinct from `resolver`, which the engine uses for a pause in the flow
+   * being discovered: a pause needs a value of a known kind, and a question the
+   * model asks — for a live value, or for a way to reach a state it cannot find
+   * — has no such shape. Its absence is what makes a discovery run unattended.
+   */
+  readonly ask?: Ask;
   /** Which model is being paid for. Rates come from it; the id is configuration. */
   readonly model?: string;
   /** The hard cap, in dollars. The model is told it; the harness enforces it. */
@@ -350,17 +360,12 @@ export async function discover<I extends FieldSet>(
   }
 
   async function ask(question: string): Promise<string> {
-    const { resolver } = options;
-    if (resolver === undefined) {
+    if (options.ask === undefined) {
       return 'there is nobody to ask; carry on with what the page gives you';
     }
-    const response = await resolver({
-      kind: 'operator',
-      name: 'ask',
-      prompt: question,
-      secret: false,
-      expiresAt: new Date(Date.now() + 300_000).toISOString(),
-    });
-    return String(response);
+    // The answer is whatever the person says. A live value they give here is
+    // held for the run and written nowhere — not into the project, not into the
+    // record — so nothing about it reaches the artifact but its input name.
+    return options.ask({ kind: 'open', text: question });
   }
 }

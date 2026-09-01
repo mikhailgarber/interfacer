@@ -270,6 +270,10 @@ Interfacer is the tool that runs discovery and writes projects. A run is two pha
 
 Both phases are conversational, and the conversation does not end when the interview does. The user stays in the loop through generation — supplying live values, watching the browser work, taking over when the model cannot proceed, and confirming what Interfacer proposes as it discovers. A run is one continuous session with a human in it. The non-interactive path exists so a capability can be re-recorded where nobody is present; it is not the normal way to record one.
 
+The human is reached in prose: a question goes out as text and the answer comes back as text, whether it is an interview question or a proposal put for confirmation.<sup>[c](testing.md#design-claim-coverage "claim: session.human-channel-is-prose — phase 9")</sup> Generation reaches the same person the same way, for the live values the model asks for as it needs them. That is deliberately not the `Resolver` a running capability pauses on: a pause has three kinds and three answer types because a flow stopped mid-step needs a value of a known shape before it can continue, and the engine rejects an answer that does not match the kind it asked for. A discovery question has no such shape — the answer is whatever the person says, and turning that into a contract answer is the model's job rather than the channel's. Widening the pause response to carry arbitrary text would loosen a validation that exists to catch a caller's mistake, for the sake of a case no flow has.
+
+Two shapes travel that channel: an open question, and a proposal put for confirmation. A proposal is separate because it is answered by acceptance rather than by content, and because the value has to be visible in the asking — what Interfacer proposes rather than asks is exactly what a person would otherwise wave through.
+
 Interfacer is a Node/TypeScript application and runs on macOS (arm and Intel), Linux amd64, and Windows under WSL.
 
 ### cli
@@ -527,7 +531,7 @@ export function resume(
 ): Promise<Answer | Suspended>;
 ```
 
-One resolver handles every kind rather than a callback per kind: the set of kinds will grow, and caller policy ("deny every approval when unattended") then lives in one place instead of three. The CLI's keyboard reader is just the built-in resolver.
+One resolver handles every kind rather than a callback per kind: the set of kinds will grow, and caller policy ("deny every approval when unattended") then lives in one place instead of three. The CLI's keyboard reader is just the built-in resolver. That resolver answers pauses in a capability that is *running*; it is not how Interfacer reaches the person during discovery, which is described under **interfacer** above.
 
 The cost of that choice is that the response type is not tied to the request kind — nothing in the signature stops a caller answering an `approval` with a string, or an `input` with `true`. The engine validates the response against the kind it asked for and treats a mismatch as a hard failure.<sup>[c](testing.md#design-claim-coverage "claim: pause.response-validated-against-kind — phase 4")</sup> A per-kind callback would have made this a compile error, at the price of triplicating the policy every caller has to write; keeping the policy in one place is worth a runtime check.
 

@@ -127,6 +127,64 @@ function capability() {
 
 const QUIET = { record: () => undefined, timeoutMs: 1_500 } as const;
 
+// @covers session.human-channel-is-prose
+describe('a question the model asks', () => {
+  it('reaches the person in prose, and their words come back', async () => {
+    const flow = capability();
+    const { decide, seen } = script(
+      turn({ name: 'ask', input: { question: 'which account should I look up?' } }),
+      turn({ name: 'snapshot', input: {} }),
+    );
+
+    const asked: string[] = [];
+    await discover(flow, {
+      ...QUIET,
+      task: 'read a balance',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 2,
+      ask: (question) => {
+        asked.push(`${question.kind}: ${question.text}`);
+        return Promise.resolve('use ACC-1001, it is the one with a balance');
+      },
+    });
+
+    expect(asked).toEqual(['open: which account should I look up?']);
+    // The answer is whatever the person says. A pause resolver could not carry
+    // it: an `operator` answer is the literal 'done'.
+    const results = seen[1]?.transcript.find((exchange) => exchange.kind === 'results');
+    expect(results?.kind === 'results' && results.results[0]?.detail).toBe(
+      'use ACC-1001, it is the one with a balance',
+    );
+    // Held for the run and written nowhere: it is not a step, so the artifact
+    // never sees it.
+    expect(flow.steps).toHaveLength(0);
+  });
+
+  it('says so when there is nobody in the session', async () => {
+    const flow = capability();
+    const { decide, seen } = script(
+      turn({ name: 'ask', input: { question: 'which account should I look up?' } }),
+      turn({ name: 'snapshot', input: {} }),
+    );
+
+    await discover(flow, {
+      ...QUIET,
+      task: 'read a balance',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 2,
+    });
+
+    const results = seen[1]?.transcript.find((exchange) => exchange.kind === 'results');
+    expect(results?.kind === 'results' && results.results[0]?.detail).toContain(
+      'there is nobody to ask',
+    );
+  });
+});
+
 // @covers agent.acting-and-recording-are-one
 describe('what a tool call does', () => {
   it('appends the step it just performed, in order', async () => {
