@@ -26,7 +26,7 @@ no model in the loop.
 
 | | what it is |
 | --- | --- |
-| `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, the execution engine, pause/resume, and the evidence rules. The only runtime dependency a generated capability has. |
+| `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, the execution engine, pause/resume, the evidence rules, and the effects a run refuses. The only runtime dependency a generated capability has. |
 | `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects. |
 | `fixtures` | Five real HTTP applications served from the repo — `clean`, `legacy`, `hostile`, `rebranded`, `skewed` — differing in how hostile they are. Everything above the unit tier is proved against these rather than a public site. `npm run fixtures` starts them for a person to look at. |
 | `e2e` | The live-model tier. Tests only. |
@@ -37,9 +37,9 @@ an API key.
 
 ## status
 
-Phase 5 of the implementation plan. **A capability can be replayed, can stop to ask a
-human without losing its place, and is bounded in what it may write down about what
-it saw.**
+Phase 6 of the implementation plan. **A capability can be replayed, can stop to ask a
+human without losing its place, is bounded in what it may write down about what it
+saw, and is refused where its own declaration says it needs a human it never asks.**
 
 `@interfacer/dsl` carries the contract and the pure primitives — `Secret`,
 `fields()`/`Infer`, `Target`, the allowlist matcher, cost accounting, run-record entry
@@ -79,8 +79,18 @@ irreversible happen, and was it authorized* is answered by reading the record. T
 record goes to stdout by default, or to stderr or a file — which is what an MCP entry
 point must select, since stdout there is the protocol transport.
 
-Not built yet: enforcement of the remaining `effects` dimensions (Phase 6), the
-project generator (Phase 7), and the agent loop (Phase 8).
+And it enforces the two `effects` dimensions the design says drive an enforcement.
+`reversible: 'no'` demands an approval before the `.commit()`, and an approval
+authorizes the step that follows rather than the run — a second irreversible action
+asks a human a second time. A `securityEffect` other than `'none'` demands both an
+approval and an attended session, so a run asked for headless is refused. Both are
+decided from the artifact before a browser opens, because a flow that cannot satisfy
+its own declaration is knowable from what was written down; the record still shows a
+run that started and failed, since a refusal nobody can see in the record reads as a
+run that never happened. `scope`, `external` and `financial` stay declared and
+published rather than enforced, each needing machinery nothing else here uses.
+
+Not built yet: the project generator (Phase 7) and the agent loop (Phase 8).
 
 ## working on it
 

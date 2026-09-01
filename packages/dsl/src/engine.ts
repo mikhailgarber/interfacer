@@ -33,6 +33,7 @@ import { evidencePolicyFor, redactUrl } from './effects.js';
 import {
   ApprovalDenied,
   CheckpointFailed,
+  EffectsRefused,
   InteractionFailed,
   NavigationBlocked,
   PauseExpired,
@@ -64,6 +65,7 @@ import {
   type RecordDestination,
 } from './record.js';
 import { isDrift, resolveTarget, type Resolution } from './resolve.js';
+import { checkSafety, requiresApproval } from './safety.js';
 import type { Secret } from './secret.js';
 import { PauseTimeout, RunSession } from './session.js';
 import { describeTarget, type TargetChain } from './target.js';
@@ -289,6 +291,43 @@ export function runFlow<I extends FieldSet, A>(
       }
     };
 
+    record({
+      kind: 'run.started',
+      inputNames: Object.keys(flow.input),
+      secretInputNames: Object.entries(flow.input)
+        .filter(([, field]) => field.kind === 'secret')
+        .map(([name]) => name),
+      dataClasses: flow.effects.dataClasses,
+      effectsDeclared: flow.effectsDeclared,
+    });
+
+    // Before a browser opens. A flow that provably cannot satisfy its own
+    // declaration — an irreversible commit no approval precedes, a
+    // `securityEffect` capability asked to run with nobody watching — is refused
+    // rather than half-run: the reason is knowable from the artifact alone, and
+    // logging in first to discover it buys nothing. The run is recorded as
+    // started and failed all the same, because a refusal a caller cannot see in
+    // the record is indistinguishable from a run that never happened.
+    const violation = checkSafety(flow, { headless: options.headless ?? true });
+    if (violation !== undefined) {
+      record(
+        {
+          kind: 'error',
+          category: 'hard-failure',
+          expected: violation.expected,
+          observed: violation.observed,
+        },
+        violation.step,
+      );
+      record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
+      throw new EffectsRefused(`${violation.step}: ${violation.expected}`, {
+        runId,
+        step: violation.step,
+        expected: violation.expected,
+        observed: violation.observed,
+      });
+    }
+
     browser ??= await chromium.launch({ headless: options.headless ?? true });
     const openBrowser = browser;
 
@@ -361,16 +400,6 @@ export function runFlow<I extends FieldSet, A>(
           blocked = { url: route.request().url(), reason: decision.reason };
           await route.abort('blockedbyclient');
         }
-      });
-
-      record({
-        kind: 'run.started',
-        inputNames: Object.keys(flow.input),
-        secretInputNames: Object.entries(flow.input)
-          .filter(([, field]) => field.kind === 'secret')
-          .map(([name]) => name),
-        dataClasses: flow.effects.dataClasses,
-        effectsDeclared: flow.effectsDeclared,
       });
 
       const extracted: Record<string, unknown> = {};
@@ -595,6 +624,22 @@ export function runFlow<I extends FieldSet, A>(
               break;
 
             case 'commit':
+              // The same rule as the pre-flight check, asserted on the run
+              // rather than on the artifact: that an approval was actually
+              // *granted*, here, before the point of no return. Replay reaches
+              // this only through a flow the pre-flight already read, so it is
+              // the discovery phase this is really for — there the flow grows a
+              // step at a time and a check made before the run started cannot
+              // have seen the commit the model is about to append.
+              if (requiresApproval(flow.effects) && approvedBySeq === null) {
+                throw await hardFailure(
+                  EffectsRefused,
+                  step.id,
+                  `${step.id}: the declared effects require an approval before this commit`,
+                  'an approval granted earlier in this run',
+                  'none had been when the commit was reached',
+                );
+              }
               await resolution.locator.click({ timeout: timeoutMs });
               await settle();
               enforceResolvedUrl(step.id);
@@ -613,6 +658,12 @@ export function runFlow<I extends FieldSet, A>(
                 'commit',
                 page,
               );
+              // Spent. An approval authorizes the step that follows — that is
+              // what the flow asked a human — so a second irreversible action
+              // needs a second one. Carrying it forward would let one approval
+              // stand for actions the approver was never shown, and would write
+              // that claim into the record.
+              approvedBySeq = null;
               break;
 
             case 'choose': {

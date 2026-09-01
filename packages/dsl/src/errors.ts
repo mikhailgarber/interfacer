@@ -90,6 +90,18 @@ export class PauseExpired extends ReplayError {}
 export class ApprovalDenied extends ReplayError {}
 
 /**
+ * The run cannot satisfy its own `effects` declaration.
+ *
+ * Refused rather than attempted: an irreversible commit no approval precedes, or
+ * a `securityEffect` capability asked to run with nobody watching. It is a
+ * `ReplayError` like any other, so a caller that already handles hard failures
+ * handles this one — but it is its own class because the fix is different in
+ * kind. A `CheckpointFailed` means the application moved; this means the flow
+ * and its declaration disagree, and no amount of retrying will change that.
+ */
+export class EffectsRefused extends ReplayError {}
+
+/**
  * A resolver answered with something the kind it was asked did not admit.
  *
  * One `Resolver` serves every kind, so the response type cannot be tied to the

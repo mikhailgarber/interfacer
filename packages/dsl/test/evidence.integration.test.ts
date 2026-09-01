@@ -362,13 +362,22 @@ describe('a dangerous step is unmistakable', () => {
     // `transferFlow` commits with no approval pause at all. The entry is still
     // written, and carries `null` — which is how an auditor sees that nothing
     // authorized it, instead of seeing nothing.
+    //
+    // `compensable` rather than `no`: since phase 6 an irreversible commit no
+    // approval precedes is refused before the browser opens, so the unauthorized
+    // commit an auditor can still meet is the one the declaration did not
+    // require an approval for. `safety.integration.test.ts` covers the refusal.
     const captured = capture();
 
-    await runFlow(transferFlow({ ...DEFAULT_EFFECTS, reversible: 'no' }), transferInput(), {
-      ...RUN,
-      browser,
-      record: captured.record,
-    });
+    await runFlow(
+      transferFlow({ ...DEFAULT_EFFECTS, reversible: 'compensable' }),
+      transferInput(),
+      {
+        ...RUN,
+        browser,
+        record: captured.record,
+      },
+    );
 
     const performed = captured.entries.find((entry) => entry.kind === 'effect.performed');
 

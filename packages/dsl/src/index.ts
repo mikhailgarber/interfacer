@@ -6,13 +6,13 @@
  * is the only component a generated capability needs at run time, which is why a
  * capability in production never loads an SDK and never needs an API key.
  *
- * Phases 1, 3, 4 and 5 land the contract, the pure primitives, the `Flow`
- * builder, the execution engine, pause and parked runs, and the evidence rules —
+ * Phases 1 and 3 through 6 land the contract, the pure primitives, the `Flow`
+ * builder, the execution engine, pause and parked runs, the evidence rules —
  * record destinations, attachments on triggers, and what `dataClasses` permits
- * either of them to carry.
+ * either of them to carry — and replay-time enforcement of the `effects`
+ * dimensions that drive one.
  *
- * Still to come: replay-time enforcement of the remaining `effects` dimensions
- * (Phase 6), and everything above the DSL — the generator, the agent loop and
+ * Still to come: everything above the DSL — the generator, the agent loop and
  * the CLI.
  */
 
@@ -124,6 +124,7 @@ export {
 export {
   ApprovalDenied,
   CheckpointFailed,
+  EffectsRefused,
   InteractionFailed,
   isReplayError,
   NavigationBlocked,
@@ -174,6 +175,15 @@ export {
   type Step,
   type StepOptions,
 } from './flow.js';
+
+export {
+  checkSafety,
+  requiresApproval,
+  type SafetyConditions,
+  type SafetyRule,
+  type SafetySubject,
+  type SafetyViolation,
+} from './safety.js';
 
 export { isDrift, resolveTarget, type Arity, type Resolution } from './resolve.js';
 

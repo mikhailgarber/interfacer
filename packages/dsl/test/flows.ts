@@ -301,6 +301,51 @@ export function approvedTransferFlow(options: AttendedOptions = {}) {
 }
 
 /**
+ * Two irreversible transfers in one run, each with its own approval.
+ *
+ * It exists for one property: an approval authorizes the step that follows, so
+ * the second commit is linked to the second approval and not to the first. One
+ * approval standing for every irreversible action in a run would write into the
+ * record a claim the approver was never shown.
+ */
+export function twoTransfersFlow(options: AttendedOptions = {}) {
+  const within = options.within ?? '5s';
+
+  const flow = new Flow({
+    id: 'twoTransfers',
+    input: transferInput,
+    ...(options.effects === undefined ? {} : { effects: options.effects }),
+  })
+    .open((i) => i.url, { id: 'login.open' })
+    .fillForm(USERNAME_FIELD, (i) => i.username, { id: 'login.username' })
+    .fillForm(PASSWORD_FIELD, (i) => i.password, { id: 'login.password' })
+    .pressButton(SIGN_IN, { id: 'login.submit' });
+
+  // The fixture's transfer screen is stateless, so a second pass is the same
+  // steps again rather than a second flow.
+  for (const pass of ['first', 'second'] as const) {
+    flow
+      .open((i) => `${i.url}/transfer`, { id: `${pass}.open` })
+      .fillForm([byLabel('From account'), css('input[name="fromRef"]')], (i) => i.fromRef, {
+        id: `${pass}.from`,
+      })
+      .fillForm([byLabel('To account'), css('input[name="toRef"]')], (i) => i.toRef, {
+        id: `${pass}.to`,
+      })
+      .fillForm([byLabel('Amount'), css('input[name="amount"]')], (i) => i.amount, {
+        id: `${pass}.amount`,
+      })
+      .pressButton([byRole('button', 'Review transfer')], { id: `${pass}.review` })
+      .checkpoint([byRole('heading', 'Confirm transfer')], { id: `${pass}.confirmReached` })
+      .pauseForApproval(`Send the ${pass} transfer?`, { within, id: `${pass}.approve` })
+      .commit([byRole('button', 'Confirm transfer')], { id: `${pass}.commit` })
+      .checkpoint([byRole('heading', 'Transfer complete')], { id: `${pass}.done` });
+  }
+
+  return flow.returns(() => ({ status: 'ok' as const }));
+}
+
+/**
  * A flow that pauses somewhere its last checkpoint no longer describes.
  *
  * `search.reached` holds on the search screen; by the time the approval is

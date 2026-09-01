@@ -347,7 +347,11 @@ settled:
   overridden locally, is undecided. It is now also a question about
   `.pauseForOperator()`: the design says the human uses the browser window that
   is already open, which a headless run does not have, and nothing yet forces a
-  flow declaring an operator pause to run headed. *(Phase 8)*
+  flow declaring an operator pause to run headed. Phase 6 settled one corner of
+  it and no more — a `securityEffect` capability is refused a headless run — and
+  in doing so found the limit: Playwright exposes no way to ask a `Browser` how
+  it was launched, so the check reads the `headless` option and a caller that
+  supplies its own browser is taken at its word. *(Phase 8)*
 - **Run-record capture** — the record goes to stdout by default. Phase 3's
   redaction test asserts a secret sentinel appears nowhere in the record, in any
   attachment, or in any thrown error — scanning all output, not checking a field.

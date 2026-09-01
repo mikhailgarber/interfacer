@@ -13,7 +13,8 @@
  *
  * This module is the declaration and the two pure functions `dataClasses` drives.
  * Enforcement of the other dimensions — approval before `.commit()`, attended
- * execution for a `securityEffect` — is Phase 6.
+ * execution for a `securityEffect` — lives in `safety.ts`, so that what a
+ * capability *declares* stays separable from what a run *refuses*.
  */
 
 /** Does it only read, or does it change something? */
