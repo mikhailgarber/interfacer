@@ -80,9 +80,10 @@ claims, which would otherwise be reported as covered by tests the gate never ran
 - **`e2e`** — real browser, real fixture, live model. The through-line: discovery
   reaches the goal, emits a project that compiles, and that project replays with
   no model attached. Slow, non-deterministic, and it costs money. **Deliberately
-  unwritten so far** — a scaffold test and nothing else. Everything the tiers above
-  prove, they prove against real browsers and real applications with a scripted model,
-  which is a stop chosen on purpose before spending money on a live one.
+  unwritten so far** — a scaffold test and nothing else, though the shape it will take
+  is settled; see **the live tier** below. Everything the tiers above prove, they prove
+  against real browsers and real applications with a scripted model, which is a stop
+  chosen on purpose before spending money on a live one.
 
 ## the fixtures
 
@@ -142,6 +143,93 @@ judgement someone has to make by looking, and it is how `hostile` gets to be hos
 rather than hostile-by-assertion. Later phases inherit it: it is what a person uses to
 sanity-check a target chain the model proposed, or to see the screen a failing replay
 was looking at.
+
+## the live tier
+
+`e2e` means **live**: a test in it requires a real model. That is the only thing
+separating it from `agent`, which gets the same real browser and the same real
+fixture — so a test that passes without a model is an agent test filed in the wrong
+directory, and it belongs inside the gate rather than outside it.
+
+A requirement rather than a preference, which settles how a missing key is handled:
+`credentials(process.env)` runs in `beforeAll` and its `MissingCredential` fails the
+tier. Not `it.runIf(API_KEY)` — a test that skips when the key is absent does not
+require a model, and a tier reporting green having run nothing is the one failure
+mode a suite cannot catch by testing harder. Failing loudly costs nothing here:
+`npm test` never invokes this tier, so the only person who sees it is the one who
+typed `npm run test:e2e`.
+
+**None of this is written yet.** What follows is the shape it takes, recorded so the
+tier is not argued from scratch again when it is.
+
+### two parts, and what crosses between them
+
+The through-line has two halves with opposite characters, and the test keeps them
+apart:
+
+- **discovery** — a live model drives the task against a fixture, and a project is
+  written. Non-deterministic, expensive, and its failures want a person to read
+  them: a model that cannot sign in to `clean` is a finding about the observation
+  format or the tool descriptions, not a red build.
+- **the project** — install, compile, call. Fully deterministic once a flow exists,
+  and the half that catches a regression: the balance is `1250.75` or it is not.
+
+What crosses between them is **a directory path and nothing else** — no flow object,
+no transcript, no cost report. The second half does not know a model was involved and
+would work pointed at any generated project, which is why it is the same install,
+compile and drive that `generate.integration.test.ts` already performs against a flow
+written by hand.
+
+Discovery runs in a `beforeAll`, so a bad one reports as a setup failure rather than
+as an assertion and the two stay distinguishable. The cost is that it stops the
+project half from running at all, which is why `generate.integration.test.ts` stays
+exactly as it is: it drives the same downstream path, gates on every commit, and is
+immune to model variance. The live test adds *and it also works on a flow a model
+actually wrote* rather than being the only thing covering it.
+
+### the operator
+
+Something has to answer the questions a discovery run asks, and a live model's
+questions cannot be scripted in advance.
+
+Everything Interfacer itself asks is a fixed string in its own source — the `vendor`
+and `appVersion` proposals, a revised `securityEffect`, the point of no return, the
+budget ceiling — and every one of them is a `confirm`. Those are answered
+deterministically against the known set, so a confirmation that nobody expected fails
+the test rather than being waved through: what Interfacer puts to a human is part of
+its contract.
+
+The `open` questions are the model's own prose, asking for one declared input at a
+time, and three things stop them being answered by matching text. The phrasing is the
+model's and varies from run to run. The input name it states in `for` is consumed by
+the loop and never reaches `Ask`. And the same input means different values at
+different moments — the account reference discovery needs is one that exists, the one
+provocation needs is one that does not, and telling those apart by matching
+`/not exist|no such|missing/` against a sentence a model wrote is precisely the flake
+this tier does not need.
+
+So the operator is a model as well: the same SDK and the same key, in a conversation
+of its own, holding a card of facts — the entry point, the credentials, an account
+that exists and an account that does not — and answering with a value. Three rules
+make that safe rather than circular.
+
+**It can fail the test and it can never pass it.** Told to answer `ABORT` when the
+questions show the tool is lost, it produces a failure, and a false failure costs an
+investigation rather than a false green. Nothing it says decides a success: that is
+settled entirely by the second half, which never sees it.
+
+**It sees only the questions.** Not the accessibility tree, not the discovery
+transcript, not the flow. This is the rule the whole arrangement rests on — a model
+that can see the page will start naming the control to use, and the test stops
+proving that discovery works from the tree alone. Its world is the facts card and
+what it has been asked.
+
+**It is stateful, because a loop is only visible across questions.** Being asked for
+the password a third time is the signal, and a per-question call cannot see it.
+
+That makes it a fake rather than a mock, on the terms of the standing rule above: a
+real function answering the way the person who commissioned the capability would,
+asserted on what the run produced. Nothing counts how often it was called.
 
 ## the two standing rules
 
@@ -411,6 +499,3 @@ settled:
   redaction test asserts a secret sentinel appears nowhere in the record, in any
   attachment, or in any thrown error — scanning all output, not checking a field.
   That needs a capture policy. *(Phase 3)*
-- **Spend guard for `e2e`** — the tier currently skips when `API_KEY` is absent.
-  Skipping is right for a scaffold and wrong for a release gate, which should say
-  it could not run rather than report green. *(deferred with the `e2e` tier)*
