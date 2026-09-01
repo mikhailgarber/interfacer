@@ -21,7 +21,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run --project unit --project fixtures --project integration",
+    "test": "vitest run --project unit --project fixtures --project integration --project agent",
     "test:unit": "vitest run --project unit",
     "test:fixtures": "vitest run --project fixtures",
     "test:integration": "vitest run --project integration",

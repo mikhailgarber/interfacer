@@ -27,7 +27,7 @@ no model in the loop.
 | | what it is |
 | --- | --- |
 | `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, the execution engine, pause/resume, the evidence rules, and the effects a run refuses. The only runtime dependency a generated capability has. |
-| `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects, and the generator is the part that exists. |
+| `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects; the generator and the discovery loop are the parts that exist. |
 | `fixtures` | Five real HTTP applications served from the repo — `clean`, `legacy`, `hostile`, `rebranded`, `skewed` — differing in how hostile they are. Everything above the unit tier is proved against these rather than a public site. `npm run fixtures` starts them for a person to look at. |
 | `e2e` | The live-model tier. Tests only. |
 
@@ -37,11 +37,11 @@ an API key.
 
 ## status
 
-Phase 7 of the implementation plan. **A capability can be replayed, can stop to ask a
+Phase 8 of the implementation plan. **A capability can be replayed, can stop to ask a
 human without losing its place, is bounded in what it may write down about what it
-saw, is refused where its own declaration says it needs a human it never asks — and
-can be written out as a complete Node project that builds and runs with nothing
-added.**
+saw, is refused where its own declaration says it needs a human it never asks, can be
+written out as a complete Node project that builds and runs with nothing added — and
+can be discovered by a model driving the same engine that replays it.**
 
 `@interfacer/dsl` carries the contract and the pure primitives — `Secret`,
 `fields()`/`Infer`, `Target`, the allowlist matcher, cost accounting, run-record entry
@@ -132,8 +132,31 @@ generator refuses one by name rather than emitting something that looks right. A
 `read` capability containing a `.commit()` is refused here too, once, rather than at
 every run.
 
-Not built yet: the agent loop (Phase 8), the interview (Phase 9) and generation mode
-(Phase 10).
+And it carries the discovery loop. **There is one execution engine with two callers.**
+`openExecution()` holds a live session and walks a flow a step at a time; `runFlow()`
+is that loop run start to finish, and discovery is the same engine with a model
+deciding what comes next. What worked during discovery is therefore a claim about
+replay — the agent tier proves it by discovering a flow and then replaying the very
+same object with nothing in the loop.
+
+Interfacer owns the loop rather than delegating it, because four things happen between
+turns and all of them are its responsibility: the allowlist is checked on any
+navigation, the successful step is appended, the run record gets its entries, and spend
+is accumulated against the budget. The model's tools are the DSL vocabulary, one tool
+per verb, plus `snapshot`, `screenshot` and `ask`; calling one executes it and appends
+the step **only if the application accepted it**, so the flow cannot drift from what
+happened. Each turn the model is given the accessibility tree — the same vocabulary its
+targets are written in — and a screenshot is a second tool that can never be a target.
+
+Every SDK call lives behind one `decide(state, tools)` function and nothing else
+imports the SDK, which a test checks by reading the source rather than by watching a
+call. `API_KEY` and `MODEL` come from the environment and are checked before a browser
+opens. A run ends when `returns` is verified, or when one of three bounds stops it: the
+budget — told to the model as a ceiling and enforced by the harness, which is the only
+one of the two that is a control — the stall guard, and a bound on turns for a provider
+that costs nothing and never finishes. The partial flow survives all of them.
+
+Not built yet: the interview (Phase 9) and generation mode (Phase 10).
 
 ## working on it
 

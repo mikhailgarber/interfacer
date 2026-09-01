@@ -16,12 +16,14 @@ import { includeGlobs, typecheckGlobs } from './test/tiers.js';
  * | `unit`        | no      | no      | no       | `npm test`           |
  * | `fixtures`    | no      | HTTP    | no       | `npm test`           |
  * | `integration` | yes     | fixture | no       | `npm test`           |
- * | `agent`       | yes     | fixture | scripted | `npm run test:agent` |
+ * | `agent`       | yes     | fixture | scripted | `npm test`           |
  * | `e2e`         | yes     | fixture | live     | `npm run test:e2e`   |
  *
- * `npm test` runs the first three — the ones that are fast, deterministic and
- * free. The last two cost wall-clock or money, so they are invoked explicitly
- * rather than swept into the default gate.
+ * `npm test` runs the first four — every tier with no live model. What keeps a
+ * tier out of the gate is a model in the loop, not a browser or a fixture: a
+ * scripted `decide` is deterministic and free, so the agent tier gates like any
+ * other. Only `e2e` is invoked explicitly, because it is slow, non-deterministic
+ * and costs money.
  *
  * What this file does *not* describe is written down in `docs/testing.md`:
  * tests import from `dist`, so a build has to precede them, and the fixture

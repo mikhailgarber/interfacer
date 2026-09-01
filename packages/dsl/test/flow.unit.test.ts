@@ -151,11 +151,15 @@ describe('the vocabulary is closed', () => {
   it('offers no way to append a step outside that vocabulary', () => {
     // The bound is structural rather than a matter of review discipline: a
     // twelfth verb would have to be a method here, and this is what notices.
+    // Methods only: `steps`, `outcomes` and `result` are getters that read the
+    // accumulated value back. Two methods append nothing and so are not verbs —
+    // `stepId`, shared with `Branch`, and `retract`, which takes back a step
+    // discovery proposed and the application refused.
+    const NOT_A_VERB = new Set(['constructor', 'stepId', 'retract']);
+
     const appending = Object.getOwnPropertyNames(Flow.prototype).filter((name) => {
-      // Methods only: `steps`, `outcomes` and `result` are getters that read the
-      // accumulated value back, and `stepId` is shared with `Branch`.
       const member = Object.getOwnPropertyDescriptor(Flow.prototype, name);
-      return typeof member?.value === 'function' && name !== 'constructor' && name !== 'stepId';
+      return typeof member?.value === 'function' && !NOT_A_VERB.has(name);
     });
 
     expect(appending.sort()).toEqual(

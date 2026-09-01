@@ -7,7 +7,8 @@
  * Phase 0 is scaffolding. The real surface arrives in:
  *
  * - **Phase 7** — the project generator (below).
- * - **Phase 8** — the agent loop and the single `decide(state, tools)` SDK seam.
+ * - **Phase 8** — the agent loop and the single `decide(state, tools)` SDK seam
+ *   (below).
  * - **Phase 9** — interview mode and the CLI's location resolution.
  * - **Phase 10** — generation mode and seeded discovery.
  */
@@ -32,6 +33,25 @@ export {
 } from './generate/project.js';
 
 export { writeProject } from './generate/write.js';
+
+export {
+  claude,
+  credentials,
+  DEFAULT_MODEL,
+  MissingCredential,
+  type ContractBrief,
+  type Decide,
+  type DiscoveryState,
+  type Exchange,
+  type ToolCall,
+  type ToolDefinition,
+  type ToolResult,
+  type Turn,
+} from './agent/decide.js';
+
+export { appendStep, answerFor, TOOLS, TOOL_NAMES, ToolArgumentError } from './agent/tools.js';
+
+export { discover, type Discovery, type DiscoveryOptions, type Ending } from './agent/loop.js';
 
 export {
   printChain,

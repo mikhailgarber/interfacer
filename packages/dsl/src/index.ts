@@ -212,4 +212,12 @@ export {
   type JsonSchema,
 } from './schema.js';
 
-export { runFlow, type RunOptions } from './engine.js';
+export {
+  openExecution,
+  runFlow,
+  type Execution,
+  type ExecutionOptions,
+  type Observation,
+  type OutcomeReached,
+  type RunOptions,
+} from './engine.js';

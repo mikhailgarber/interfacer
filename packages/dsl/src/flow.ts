@@ -341,6 +341,28 @@ export class Flow<
     return candidate;
   }
 
+  /**
+   * Take back the step just appended, because performing it did not work.
+   *
+   * Discovery appends on success only: the model proposes a step, the engine
+   * performs it against the live session, and it is kept if the application
+   * accepted it. The builder appends eagerly, so "kept if it worked" is
+   * expressed here as taking it back when it did not — and it is always the last
+   * step, because discovery proposes one at a time.
+   *
+   * The id stays spent. Two attempts at the same target are then distinguishable
+   * in the record, which is what a reader of a discovery run wants.
+   */
+  retract(step: Step): void {
+    const last = this.#steps.at(-1);
+    if (last !== step) {
+      throw new Error(
+        `cannot retract ${step.id} from flow ${this.id}: it is not the step most recently appended`,
+      );
+    }
+    this.#steps.pop();
+  }
+
   #push(step: Step): this {
     this.#steps.push(step);
     return this;

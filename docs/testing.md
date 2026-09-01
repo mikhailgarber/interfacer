@@ -14,12 +14,15 @@ tiers are ordered by what they are permitted to reach for.
 | `unit`        | no      | no      | no       | `npm test`           |
 | `fixtures`    | no      | HTTP    | no       | `npm test`           |
 | `integration` | yes     | fixture | no       | `npm test`           |
-| `agent`       | yes     | fixture | scripted | `npm run test:agent` |
+| `agent`       | yes     | fixture | scripted | `npm test`           |
 | `e2e`         | yes     | fixture | live     | `npm run test:e2e`   |
 
-`npm test` runs the first three — fast, deterministic and free. The last two cost
-wall-clock or money and are invoked explicitly, so nothing sweeps them into the
-default gate by accident.
+`npm test` runs the first four. **What keeps a tier out of the gate is a live model,
+not a browser or a fixture.** A scripted `decide` is as deterministic and as free as a
+hand-written flow, so the agent tier gates on the same terms as `integration` — and it
+holds nine of the design's claims, which would otherwise be reported as covered by
+tests the gate never ran. Only `e2e` is invoked explicitly: it is slow,
+non-deterministic, and it costs money.
 
 - **`unit`** — no browser, no app. What is genuinely pure: `Secret` redaction,
   allowlist matching against resolved URLs, cost accounting from `usage`,
@@ -45,7 +48,21 @@ default gate by accident.
   Interfacer's loop rather than the model: step appending, cost accounting, stall
   detection, budget exhaustion, and the between-turns allowlist check. It is also
   the only practical way to test pathological behaviour, because a live model will
-  not produce it on demand.
+  not produce it on demand — a provider that never finishes, or one that follows an
+  instruction it read on a page. The scripted `decide` is a fake: it returns
+  predetermined tool calls, and nothing asserts how it was called. It adds about six
+  seconds to the gate, against `integration`'s sixty-five.
+
+  It is also the tier that reads the **observation format** against more than one
+  app. The design gives three reasons for showing the model an accessibility tree,
+  and each needs a different fixture to see: `clean` shows the first — a tree that
+  reads `button "Sign in"` is why a model proposes `byRole('button', 'Sign in')`.
+  `legacy` shows the second, that a poor tree is still a tree: no `<label for>`, so
+  the textboxes arrive unnamed and the field names as text beside them, and the
+  whole thing is a third the size of the markup behind it. `hostile` shows what a
+  picture could not — its sign-in button reads `Sign in` and is announced as
+  `Submit credentials`, so the tree is the only observation in which the name that
+  resolves is visible at all.
 - **`e2e`** — real browser, real fixture, live model. The through-line: discovery
   reaches the goal, emits a project that compiles, and that project replays with
   no model attached. Slow, non-deterministic, and it costs money.
@@ -360,16 +377,16 @@ settled:
   flow completes without entering it and Phase 3 is not forced to decide. It
   becomes a real question the first time a capability needs something that only
   exists inside a frame. *(Phase 3, if then)*
-- **Headed vs headless** — replay is headless by default and discovery is headed
-  so a human can watch. Which the `agent` and `e2e` tiers use, and how that is
-  overridden locally, is undecided. It is now also a question about
-  `.pauseForOperator()`: the design says the human uses the browser window that
-  is already open, which a headless run does not have, and nothing yet forces a
-  flow declaring an operator pause to run headed. Phase 6 settled one corner of
-  it and no more — a `securityEffect` capability is refused a headless run — and
-  in doing so found the limit: Playwright exposes no way to ask a `Browser` how
-  it was launched, so the check reads the `headless` option and a caller that
-  supplies its own browser is taken at its word. *(Phase 8)*
+- **Headed vs headless for `e2e`** — mostly settled. Replay is headless by
+  default; `discover()` is headed by default, so an operator pause hands over a
+  window that is already open, and a generated CLI runs headed where the flow
+  declares one or the effects require an attended session. Phase 6 found the
+  limit: Playwright exposes no way to ask a `Browser` how it was launched, so the
+  check reads the `headless` option and a caller supplying its own browser is
+  taken at its word — which is what the `agent` tier does, since it is testing
+  the loop rather than the window. What a live-model `e2e` run should use, and
+  how a person overrides it locally to watch one, is the part still open.
+  *(Phase 10)*
 - **Run-record capture** — the record goes to stdout by default. Phase 3's
   redaction test asserts a secret sentinel appears nowhere in the record, in any
   attachment, or in any thrown error — scanning all output, not checking a field.

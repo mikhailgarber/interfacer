@@ -18,18 +18,11 @@
  * record**. The DSL primitives are the only place the engine is instrumented, so
  * evidence is uniform across every capability and cannot be forgotten.
  */
-import {
-  chromium,
-  type Browser,
-  type BrowserContext,
-  type Page,
-  type Request,
-  type Route,
-} from 'playwright';
+import { chromium, type Browser, type Page, type Request, type Route } from 'playwright';
 
 import { checkAllowlist, type HostPattern } from './allowlist.js';
 import { capture, type AttachmentTrigger } from './attachments.js';
-import { evidencePolicyFor, redactUrl } from './effects.js';
+import { evidencePolicyFor, redactUrl, VALUE_BEARING } from './effects.js';
 import {
   ApprovalDenied,
   CheckpointFailed,
@@ -63,6 +56,7 @@ import {
   type PauseReason,
   type Phase,
   type RecordDestination,
+  type TerminalStatus,
 } from './record.js';
 import { isDrift, resolveTarget, type Resolution } from './resolve.js';
 import { checkSafety, requiresApproval } from './safety.js';
@@ -169,7 +163,1030 @@ class Terminated extends Error {
 }
 
 /**
- * Run a flow.
+ * A run in progress: a live session with a flow being walked through it.
+ *
+ * There is **one execution engine with two callers**. Replay is this engine
+ * walking a finished flow start to finish. Discovery is the same engine walking a
+ * flow the model is still appending to: the agent proposes a step, the engine
+ * performs it against this same session, and what the engine observes becomes the
+ * model's next input. Discovery is not a different way of executing, only a
+ * different way of deciding what to execute next — which is what makes "it worked
+ * during discovery" a claim about replay rather than about a prototype.
+ *
+ * That property only holds if there is literally one implementation, so this is
+ * it: the resolve → act → verify → record cycle, the retry ladder, the allowlist
+ * enforcement and the evidence, exposed a step at a time. {@link runFlow} is the
+ * replay caller and owns nothing but the loop and the three endings.
+ */
+export interface Execution {
+  /** The live page. Discovery hands it to a human on an operator pause. */
+  readonly page: Page;
+  readonly runId: string;
+  /**
+   * Run one step: resolve, act or observe, verify, record.
+   *
+   * Returns `undefined` when the step simply succeeded, and the answer when a
+   * declared outcome matched — the engine terminates on a match and nothing
+   * after it executes, so a caller that gets one stops.
+   */
+  perform(step: Step): Promise<OutcomeReached | undefined>;
+  /** What the page looks like now, in the vocabulary a target is written in. */
+  observe(): Promise<Observation>;
+  /**
+   * A picture of the page, or `undefined` where `dataClasses` permits no pixels.
+   *
+   * A second observation rather than a default: it informs a decision and can
+   * never be a target, because nothing durable is recordable from a coordinate.
+   */
+  screenshot(): Promise<Buffer | undefined>;
+  /** Apply the flow's `.returns()` to what `.extract()` read. */
+  result(): unknown;
+  /** Write an entry into this run's record. */
+  record(body: EntryBody, stepId?: string): Entry;
+  finishedWith(status: TerminalStatus): void;
+  /** Record an error that is not already a verdict, and leave it thrown. */
+  failedWith(error: unknown): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** What {@link Execution.perform} returns when a declared outcome matched. */
+export interface OutcomeReached {
+  readonly answer: unknown;
+}
+
+/**
+ * What the model is given each turn.
+ *
+ * The accessibility tree rather than markup, for three reasons, heaviest first:
+ * it is the same vocabulary as the targets the model has to produce, so a model
+ * shown `button "Look up"` proposes `byRole('button', 'Look up')` where one shown
+ * a wall of divs proposes a brittle CSS path; it degrades better than markup; and
+ * it is what an OS accessibility API would also provide, so the observation seam
+ * and the targeting seam are the same seam.
+ */
+export interface Observation {
+  readonly url: string;
+  readonly title: string;
+  /** Playwright's ARIA snapshot: roles, names and structure, as YAML. */
+  readonly tree: string;
+}
+
+export interface ExecutionOptions extends RunOptions {
+  /**
+   * Where a pause parks when there is nobody to ask.
+   *
+   * Supplied by {@link runFlow}, which has to create it before the browser opens
+   * so that a caller holding the settlement can be handed a `Suspended`. An
+   * execution opened without one makes its own, which is what discovery does:
+   * there is a human present, so it answers rather than parks.
+   */
+  readonly session?: RunSession;
+}
+
+/**
+ * Open a session and hold it, ready to be walked a step at a time.
+ *
+ * Everything that makes a run auditable is set up here and nowhere else — the
+ * record, the evidence policy, the allowlist routing — so both callers get it
+ * without having to remember to.
+ */
+export async function openExecution<I extends FieldSet, A>(
+  flow: Flow<I, A>,
+  input: Infer<I>,
+  options: ExecutionOptions = {},
+): Promise<Execution> {
+  const ownsBrowser = options.browser === undefined;
+  let browser: Browser | undefined = options.browser;
+
+  const runId =
+    options.runId ?? `run_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const emit = options.record ?? createEmitter(options.destination ?? DEFAULT_DESTINATION);
+  // What `dataClasses` permits this run to capture. Computed once: it is a
+  // property of the capability, not a judgement made fresh on each page.
+  const policy = evidencePolicyFor(flow.effects.dataClasses);
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const retries = options.retries ?? DEFAULT_RETRIES;
+  const clock = options.now ?? ((): Date => new Date());
+  const { resolver } = options;
+
+  const entries = createEntryFactory(
+    {
+      runId,
+      capabilityId: flow.id,
+      capabilityVersion: options.capabilityVersion ?? '0.0.0',
+      phase: options.phase ?? 'replay',
+    },
+    options.now === undefined ? {} : { now: options.now },
+  );
+
+  const record = (body: EntryBody, stepId?: string, evidence?: EntryEvidence): Entry => {
+    const entry = entries.entry(body, stepId, evidence);
+    emit(entry);
+    return entry;
+  };
+
+  /**
+   * Record an entry that a trigger hangs attachments off.
+   *
+   * The three triggers are the only moments rich capture happens: a hard
+   * failure, a control transfer, and the `.commit()` step. Capture runs
+   * *before* the entry is stamped, so the files can be named for the `seq`
+   * the entry is about to carry and the reference is right the first time.
+   */
+  const recordWithCapture = async (
+    body: EntryBody,
+    stepId: string | undefined,
+    trigger: AttachmentTrigger,
+    page: Page | undefined,
+  ): Promise<Entry> => {
+    const seq = entries.nextSeq;
+
+    if (page === undefined) {
+      return record(body, stepId);
+    }
+
+    if (options.attachmentDir === undefined) {
+      return record(body, stepId, {
+        attachmentsSkipped: 'no attachment directory is configured',
+      });
+    }
+
+    try {
+      const attachments = await capture({
+        page,
+        dir: options.attachmentDir,
+        runId,
+        seq,
+        trigger,
+        policy,
+      });
+      return record(body, stepId, { attachments });
+    } catch (error) {
+      // A capture that fails must not turn a diagnosable failure into an
+      // undiagnosable one, so it is noted and the entry still goes out.
+      return record(body, stepId, {
+        attachmentsSkipped: error instanceof Error ? error.message : 'capture failed',
+      });
+    }
+  };
+
+  record({
+    kind: 'run.started',
+    inputNames: Object.keys(flow.input),
+    secretInputNames: Object.entries(flow.input)
+      .filter(([, field]) => field.kind === 'secret')
+      .map(([name]) => name),
+    dataClasses: flow.effects.dataClasses,
+    effectsDeclared: flow.effectsDeclared,
+  });
+
+  // Before a browser opens. A flow that provably cannot satisfy its own
+  // declaration — an irreversible commit no approval precedes, a
+  // `securityEffect` capability asked to run with nobody watching — is refused
+  // rather than half-run: the reason is knowable from the artifact alone, and
+  // logging in first to discover it buys nothing. The run is recorded as
+  // started and failed all the same, because a refusal a caller cannot see in
+  // the record is indistinguishable from a run that never happened.
+  const violation = checkSafety(flow, { headless: options.headless ?? true });
+  if (violation !== undefined) {
+    record(
+      {
+        kind: 'error',
+        category: 'hard-failure',
+        expected: violation.expected,
+        observed: violation.observed,
+      },
+      violation.step,
+    );
+    record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
+    throw new EffectsRefused(`${violation.step}: ${violation.expected}`, {
+      runId,
+      step: violation.step,
+      expected: violation.expected,
+      observed: violation.observed,
+    });
+  }
+
+  browser ??= await chromium.launch({ headless: options.headless ?? true });
+  const openBrowser = browser;
+
+  // Origins the caller is entitled to reach. The entry point's own origin is
+  // added when `.open()` resolves it: the caller chose where to point the
+  // capability, so the allowlist is not there to second-guess that — it bounds
+  // everywhere *else* the automation could be taken.
+  const allowed = new Set<HostPattern>(options.allowlist ?? flow.declaredAllowlist);
+
+  let blocked: { url: string; reason: string } | undefined;
+  /**
+   * The most recent checkpoint that passed.
+   *
+   * Kept because resume re-asserts it: after a human touches the session the
+   * flow cannot assume where it is, so it validates a known state before
+   * continuing rather than driving blind into whatever is on screen.
+   */
+  let lastCheckpoint: { id: string; target: TargetChain } | undefined;
+  /**
+   * The `seq` of the `pause` entry that most recently approved something.
+   *
+   * `null` where none has. An `effect.performed` carrying `null` is exactly how
+   * a missing approval shows up in the record: present and unlinked, rather
+   * than absent and unnoticed.
+   */
+  let approvedBySeq: number | null = null;
+  /**
+   * The origin the caller pointed this run at, admitted when it is first opened.
+   *
+   * Held so that only the first navigation establishes it: everything after is
+   * judged against the allowlist, which is what makes the list a bound on where
+   * the automation can be *taken* rather than a formality a later step can widen.
+   */
+  let entryPoint: string | undefined;
+
+  const context = await openBrowser.newContext();
+  const page = await context.newPage();
+
+  // Closing the context always, and the browser only where the engine opened
+  // it, keeps the standing rule that the engine never closes a browser it did
+  // not open — even when a TTL is what is doing the closing.
+  const close = async (): Promise<void> => {
+    await context.close().catch(() => undefined);
+    if (ownsBrowser) {
+      await openBrowser.close().catch(() => undefined);
+    }
+  };
+
+  // An execution opened without a session makes its own, which is what discovery
+  // does: there is a human present, so a pause is answered rather than parked.
+  const session =
+    options.session ??
+    new RunSession({ ttlMs: options.ttlMs ?? DEFAULT_PARK_TTL_MS, dispose: close });
+
+  const isMainDocument = (request: Request): boolean =>
+    request.resourceType() === 'document' && request.frame() === page.mainFrame();
+
+  // Every navigation is recorded, redirect hops included. `page.route` is not
+  // enough on its own: it fires for the request the engine makes and not for
+  // the hops the browser follows, which is exactly the case the design cares
+  // about — an allowed host can redirect off-list.
+  page.on('request', (request: Request) => {
+    if (!isMainDocument(request)) {
+      return;
+    }
+    const decision = checkAllowlist(request.url(), [...allowed]);
+    record({
+      kind: 'navigation',
+      // Judged on the real URL, recorded through `dataClasses`: an
+      // application that puts a reference in a query string would otherwise
+      // write a value the caller supplied straight into the record.
+      url: redactUrl(request.url(), policy),
+      allowed: decision.allowed,
+      ...(decision.allowed ? { pattern: decision.pattern } : { reason: decision.reason }),
+    });
+  });
+
+  // Enforcement lives where the DSL performs the navigation, because the
+  // decision is per navigation: a process-level network permission cannot tell
+  // a legitimate page load from one an injection asked for. This aborts the
+  // request the engine itself issues; a redirect off-list is caught by
+  // `enforceResolvedUrl` below, on the URL the navigation actually reached.
+  await page.route('**/*', async (route: Route) => {
+    if (!isMainDocument(route.request())) {
+      await route.continue();
+      return;
+    }
+
+    const decision = checkAllowlist(route.request().url(), [...allowed]);
+    if (decision.allowed) {
+      await route.continue();
+    } else {
+      blocked = { url: route.request().url(), reason: decision.reason };
+      await route.abort('blockedbyclient');
+    }
+  });
+
+  const extracted: Record<string, unknown> = {};
+  /**
+   * What `.pauseForInput()` has obtained so far, passed to every accessor as
+   * its second argument. Separate from `input` because it has different
+   * provenance: asked for mid-run, never through a field declaration.
+   */
+  const obtained: Record<string, Secret> = {};
+
+  return {
+    page,
+    runId,
+    record,
+    perform: async (step: Step): Promise<OutcomeReached | undefined> => {
+      try {
+        await runStep(step);
+        return undefined;
+      } catch (error) {
+        // A matched outcome unwinds the step loop from wherever it was
+        // detected. It is an answer, not a failure, so it comes back as a
+        // value rather than staying an exception.
+        if (error instanceof Terminated) {
+          return { answer: error.answer };
+        }
+        throw error;
+      }
+    },
+    observe: async (): Promise<Observation> => ({
+      url: page.url(),
+      title: await page.title(),
+      tree: await page.locator('body').ariaSnapshot(),
+    }),
+    screenshot: async (): Promise<Buffer | undefined> =>
+      policy.screenshot === 'none'
+        ? undefined
+        : await page.screenshot(
+            policy.screenshot === 'masked' ? { mask: [page.locator(VALUE_BEARING)] } : {},
+          ),
+    result: (): unknown => {
+      const map = flow.result;
+      if (map === undefined) {
+        throw new CheckpointFailed('flow declares no result', {
+          runId,
+          step: flow.id,
+          expected: 'a .returns() declaration',
+          observed: 'none',
+        });
+      }
+      return (map as (values: Record<string, unknown>) => unknown)(extracted);
+    },
+    finishedWith: (status: TerminalStatus): void => {
+      record({ kind: 'run.finished', status });
+    },
+    failedWith: async (error: unknown): Promise<void> => {
+      // A `ReplayError` is already a verdict and has already written its own
+      // entry; anything else reached here without being classified at all.
+      if (!(error instanceof ReplayError) && !(error instanceof Terminated)) {
+        record({
+          kind: 'error',
+          category: 'hard-failure',
+          expected: 'the flow to run to completion',
+          observed: error instanceof Error ? error.message : String(error),
+        });
+      }
+      await Promise.resolve();
+    },
+    close,
+  };
+
+  // ---- the step cycle -------------------------------------------------
+
+  async function runStep(step: Step): Promise<void> {
+    record({ kind: 'step.started', verb: step.kind }, step.id);
+
+    if (step.kind === 'pause') {
+      // Never round the retry-then-detect ladder. A refused approval or an
+      // unanswered escalation is already a verdict, and re-asking would turn a
+      // deny into a poll; letting the detectors see it would let an unrelated
+      // banner explain away a human's decision.
+      await runPause(step);
+      return;
+    }
+
+    for (let attempt = 0; ; attempt++) {
+      const failure = await attemptStep(step);
+
+      if (failure === undefined) {
+        return;
+      }
+
+      const attemptsRemaining = isRetryable(step) ? retries - attempt : 0;
+      const decision = decideVerification({
+        satisfied: false,
+        detectors: await evaluateDetectors(flow.outcomes),
+        recovery: { available: isRetryable(step), attemptsRemaining },
+      });
+
+      switch (decision.action) {
+        case 'recover':
+          // Recorded as evidence only; recovery never reaches the caller.
+          record({ kind: 'retry', reason: failure.observed, attempt: attempt + 1 }, step.id);
+          continue;
+
+        case 'outcome': {
+          const declaration = flow.outcomes[decision.index];
+          if (declaration === undefined) {
+            break;
+          }
+          record(
+            { kind: 'outcome.matched', detectorIndex: decision.index, status: declaration.id },
+            step.id,
+          );
+          throw new Terminated(
+            (declaration.map as (value: Infer<I>, got: Record<string, Secret>) => unknown)(
+              input,
+              obtained,
+            ),
+          );
+        }
+
+        case 'proceed':
+        case 'fail':
+          break;
+      }
+
+      throw blocked === undefined
+        ? await hardFailure(
+            CheckpointFailed,
+            step.id,
+            `${step.id}: ${failure.observed}`,
+            failure.expected,
+            failure.observed,
+          )
+        : await hardFailure(
+            NavigationBlocked,
+            step.id,
+            `${step.id}: navigation left the allowlist`,
+            `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
+            `${redactUrl(blocked.url, policy)} (${blocked.reason})`,
+          );
+    }
+  }
+
+  /**
+   * One attempt at a step. Returns `undefined` on success, or what went wrong.
+   *
+   * Ambiguity is not returned as a failure: it throws on the spot, because it
+   * is never recoverable and never a business outcome — two elements answering
+   * to the same description means the recorded intent is unclear, and no
+   * amount of waiting or detecting changes that.
+   */
+  async function attemptStep(
+    step: Exclude<Step, PauseStep & { kind: 'pause' }>,
+  ): Promise<StepFailure | undefined> {
+    if (step.kind === 'open') {
+      return openEntryPoint(
+        step.url as unknown as (value: Infer<I>, got: Record<string, Secret>) => string,
+        step.id,
+      );
+    }
+
+    if (step.kind === 'pauseUntil') {
+      return waitForSurface(step);
+    }
+
+    if (step.kind === 'optional') {
+      const resolution = await resolveTarget(page, step.target, 'unique', timeoutMs);
+      if (!resolution.found) {
+        // A no-op when the target does not resolve — an intermittent consent
+        // screen that simply is not there today.
+        return undefined;
+      }
+      for (const inner of step.steps) {
+        const failure = await attemptStep(inner);
+        if (failure !== undefined) {
+          return failure;
+        }
+      }
+      return undefined;
+    }
+
+    if (step.kind === 'oneOf') {
+      for (const arm of step.arms) {
+        const resolution = await resolveTarget(page, arm.when, 'present', timeoutMs);
+        if (!resolution.found) {
+          continue;
+        }
+        for (const inner of arm.steps) {
+          const failure = await attemptStep(inner);
+          if (failure !== undefined) {
+            return failure;
+          }
+        }
+        return undefined;
+      }
+      return {
+        expected: `one of ${String(step.arms.length)} expected screens`,
+        observed: 'no arm matched',
+      };
+    }
+
+    const chain = stepTarget(step);
+    if (chain === undefined) {
+      return undefined;
+    }
+
+    const resolution = await resolveTarget(page, chain, 'unique', timeoutMs);
+
+    if (!resolution.found) {
+      if (resolution.reason === 'ambiguous') {
+        throw await hardFailure(
+          TargetAmbiguous,
+          step.id,
+          `${step.id}: ${String(resolution.matches)} elements matched`,
+          `exactly one element for ${describeChain(chain)}`,
+          `${String(resolution.matches)} elements matched strategy "${resolution.strategy}"`,
+        );
+      }
+      return {
+        expected: describeChain(chain),
+        observed: 'no strategy in the chain resolved',
+      };
+    }
+
+    return act(step, resolution);
+  }
+
+  async function act(
+    step: Exclude<Step, { kind: 'open' } | { kind: 'optional' } | { kind: 'oneOf' } | PauseStep>,
+    resolution: Resolution & { found: true },
+  ): Promise<StepFailure | undefined> {
+    try {
+      switch (step.kind) {
+        case 'fillForm': {
+          const raw = (step.value as (value: Infer<I>, got: Record<string, Secret>) => FillValue)(
+            input,
+            obtained,
+          );
+          // A secret reaches the page only through an explicit `.reveal()`,
+          // and this is the one place in the codebase that call is made.
+          const value = typeof raw === 'string' ? raw : raw.reveal();
+          await resolution.locator.fill(value, { timeout: timeoutMs });
+          break;
+        }
+
+        case 'pressButton':
+          await resolution.locator.click({ timeout: timeoutMs });
+          await settle();
+          enforceResolvedUrl(step.id);
+          break;
+
+        case 'commit':
+          // The same rule as the pre-flight check, asserted on the run
+          // rather than on the artifact: that an approval was actually
+          // *granted*, here, before the point of no return. Replay reaches
+          // this only through a flow the pre-flight already read, so it is
+          // the discovery phase this is really for — there the flow grows a
+          // step at a time and a check made before the run started cannot
+          // have seen the commit the model is about to append.
+          if (requiresApproval(flow.effects) && approvedBySeq === null) {
+            throw await hardFailure(
+              EffectsRefused,
+              step.id,
+              `${step.id}: the declared effects require an approval before this commit`,
+              'an approval granted earlier in this run',
+              'none had been when the commit was reached',
+            );
+          }
+          await resolution.locator.click({ timeout: timeoutMs });
+          await settle();
+          enforceResolvedUrl(step.id);
+          // Someone auditing a run should be able to answer *did anything
+          // irreversible happen, and was it authorized* by reading the
+          // record, not by inferring it from a `step.finished` on a button
+          // press. This is the entry that answers it.
+          await recordWithCapture(
+            {
+              kind: 'effect.performed',
+              dimension: 'reversible',
+              value: flow.effects.reversible,
+              approvedBySeq,
+            },
+            step.id,
+            'commit',
+            page,
+          );
+          // Spent. An approval authorizes the step that follows — that is
+          // what the flow asked a human — so a second irreversible action
+          // needs a second one. Carrying it forward would let one approval
+          // stand for actions the approver was never shown, and would write
+          // that claim into the record.
+          approvedBySeq = null;
+          break;
+
+        case 'choose': {
+          const value = (
+            step.value as unknown as (value: Infer<I>, got: Record<string, Secret>) => string
+          )(input, obtained);
+          await resolution.locator.selectOption(value, { timeout: timeoutMs });
+          break;
+        }
+
+        case 'checkpoint':
+          record({ kind: 'checkpoint', satisfied: true }, step.id);
+          lastCheckpoint = { id: step.id, target: step.target };
+          break;
+
+        case 'extract': {
+          const text = (await resolution.locator.textContent({ timeout: timeoutMs })) ?? '';
+          extracted[step.name] = step.parse(text.trim());
+          break;
+        }
+      }
+    } catch (error) {
+      // A hard failure raised here is already a verdict — an ambiguous target
+      // or a navigation that left the allowlist. Folding it into a step
+      // failure would send it round the retry-then-detect ladder, where it
+      // could surface as a business outcome it has nothing to do with.
+      if (error instanceof ReplayError) {
+        throw error;
+      }
+      return {
+        expected: describeChain(stepTarget(step) ?? ([] as unknown as TargetChain)),
+        observed: error instanceof Error ? (error.message.split('\n')[0] ?? 'failed') : 'failed',
+      };
+    }
+
+    record(
+      {
+        kind: 'step.finished',
+        resolvedBy: resolution.strategy,
+        strategyIndex: resolution.index,
+        // A fallback winning is the drift signal: the application changed in a
+        // way the artifact survived by luck.
+        drifted: isDrift(resolution),
+      },
+      step.id,
+    );
+
+    return undefined;
+  }
+
+  async function openEntryPoint(
+    accessor: (value: Infer<I>, got: Record<string, Secret>) => string,
+    stepId: string,
+  ): Promise<StepFailure | undefined> {
+    const url = accessor(input, obtained);
+
+    let host: string;
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      return { expected: 'a URL', observed: redactUrl(url, policy) };
+    }
+
+    if (entryPoint === undefined) {
+      // The entry point is an ordinary input, so the caller chose where to point
+      // the capability and the allowlist is not there to second-guess that. It
+      // admits exactly one origin this way — the first one opened — because what
+      // the list guards is everywhere *else* the automation could be taken. A
+      // later `.open()` naming a host of its own is precisely that.
+      entryPoint = host;
+      allowed.add(host);
+    } else {
+      const decision = checkAllowlist(url, [...allowed]);
+      if (!decision.allowed) {
+        const recorded = redactUrl(url, policy);
+        record({ kind: 'navigation', url: recorded, allowed: false, reason: decision.reason });
+        // Refused before the browser is asked to go anywhere. A navigation
+        // aborted in flight leaves Chromium sitting on its own error page, which
+        // strands a discovery run that would otherwise be told the step failed
+        // and try something else.
+        throw await hardFailure(
+          NavigationBlocked,
+          stepId,
+          `${stepId}: navigation outside the allowlist`,
+          `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
+          `${recorded} (${decision.reason})`,
+        );
+      }
+    }
+
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs * 3 });
+    } catch (error) {
+      if (blocked !== undefined) {
+        return {
+          expected: 'a navigation within the allowlist',
+          observed: redactUrl(blocked.url, policy),
+        };
+      }
+      throw new SurfaceUnavailable(`${stepId}: could not reach ${redactUrl(url, policy)}`, {
+        runId,
+        step: stepId,
+        expected: `a page at ${redactUrl(url, policy)}`,
+        observed:
+          error instanceof Error ? (error.message.split('\n')[0] ?? 'unreachable') : 'unreachable',
+      });
+    }
+
+    enforceResolvedUrl(stepId);
+    record({ kind: 'step.finished', resolvedBy: 'css', strategyIndex: 0, drifted: false }, stepId);
+    return undefined;
+  }
+
+  /** Let a navigation caused by a click finish before the next step looks. */
+  async function settle(): Promise<void> {
+    await page.waitForLoadState('domcontentloaded', { timeout: timeoutMs }).catch(() => undefined);
+  }
+
+  /**
+   * Judge where the navigation actually landed.
+   *
+   * The check applies to the **resolved** URL after redirects, since an
+   * allowed host can redirect off-list — and a redirect is followed by the
+   * browser without the engine's request interception seeing it. Leaving the
+   * replay allowlist is not a policy question: the list is computed rather
+   * than confirmed, so leaving it means the application changed.
+   */
+  function enforceResolvedUrl(stepId: string): void {
+    const current = page.url();
+    if (current === 'about:blank') {
+      return;
+    }
+
+    const decision = checkAllowlist(current, [...allowed]);
+    if (decision.allowed) {
+      return;
+    }
+
+    const recorded = redactUrl(current, policy);
+
+    record(
+      {
+        kind: 'error',
+        category: 'hard-failure',
+        expected: `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
+        observed: recorded,
+      },
+      stepId,
+    );
+    record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
+
+    throw new NavigationBlocked(`${stepId}: navigation resolved outside the allowlist`, {
+      runId,
+      step: stepId,
+      expected: `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
+      observed: `${recorded} (${decision.reason})`,
+    });
+  }
+
+  // ---- pause and resume -----------------------------------------------
+
+  /**
+   * Wait for a surface, with a bound. Resolved by polling, so nobody is asked.
+   *
+   * Its expiry is returned as an ordinary step failure rather than thrown, so
+   * it goes round the verification ladder — retry, then the declared
+   * detectors, then a hard failure. That is deliberate: a screen that never
+   * arrived is exactly the condition an outcome detector may legitimately
+   * explain, and "no such account" reaching the caller as a timeout would be
+   * the taxonomy inverted.
+   */
+  async function waitForSurface(
+    step: PauseStep & { kind: 'pauseUntil' },
+  ): Promise<StepFailure | undefined> {
+    const startedAt = Date.now();
+    record(
+      {
+        kind: 'pause',
+        reason: 'awaiting-surface',
+        name: step.id,
+        declared: true,
+        expiresAt: new Date(clock().getTime() + step.withinMs).toISOString(),
+      },
+      step.id,
+    );
+
+    const resolution = await resolveTarget(page, step.target, 'present', step.withinMs);
+    if (!resolution.found) {
+      return {
+        expected: describeChain(step.target),
+        observed: `the surface did not arrive within ${String(step.withinMs)}ms`,
+      };
+    }
+
+    record(
+      {
+        kind: 'resume',
+        reason: 'awaiting-surface',
+        resolvedBy: 'polling',
+        waitedMs: Date.now() - startedAt,
+      },
+      step.id,
+    );
+    return undefined;
+  }
+
+  /**
+   * Ask a human, or park because there is nobody to ask.
+   *
+   * A pause named in the flow is part of the contract, not an incident: MFA on
+   * every login is expected, and a capability that declares it is attended
+   * rather than broken. That is why this records `declared: true` and does not
+   * escalate — only an *undeclared* pause is an escalation, and during replay
+   * one cannot occur, because the DSL is the only way to stop.
+   */
+  async function runPause(step: PauseStep & { kind: 'pause' }): Promise<void> {
+    const startedAt = Date.now();
+    const reason = PAUSE_REASON[step.pauseKind];
+    const expiresAt = new Date(clock().getTime() + step.withinMs).toISOString();
+    const request: InteractionRequest = {
+      kind: step.pauseKind,
+      name: step.name,
+      prompt: step.prompt,
+      // Every value obtained mid-run is a secret: it has never been through
+      // the field declarations, so nothing else would redact it.
+      secret: step.pauseKind === 'input',
+      expiresAt,
+    };
+
+    const holder = resolver === undefined ? 'caller' : 'resolver';
+    const pauseEntry = record(
+      { kind: 'pause', reason, name: step.name, declared: true, expiresAt },
+      step.id,
+    );
+    await recordWithCapture(
+      { kind: 'control.transferred', holder, stateBefore: where() },
+      step.id,
+      'control-transfer',
+      page,
+    );
+
+    const response = await obtainResponse(step, request);
+    const heldMs = Date.now() - startedAt;
+
+    const check = checkResponse(step.pauseKind, response);
+    if (!check.ok) {
+      throw await hardFailure(
+        InteractionFailed,
+        step.id,
+        `${step.id}: a ${step.pauseKind} answered with the wrong kind of value`,
+        check.expected,
+        check.observed,
+      );
+    }
+
+    await recordWithCapture(
+      { kind: 'control.returned', holder, heldMs, stateAfter: where() },
+      step.id,
+      'control-transfer',
+      page,
+    );
+    record({ kind: 'resume', reason, resolvedBy: holder, waitedMs: heldMs }, step.id);
+
+    switch (step.pauseKind) {
+      case 'input':
+        obtained[step.name] = response as Secret;
+        break;
+
+      case 'approval':
+        if (response === true) {
+          // The `seq` an `effect.performed` will point at. Linking them is
+          // what turns the effects declaration from a claim in the contract
+          // into something observable after the fact.
+          approvedBySeq = pauseEntry.seq;
+          break;
+        }
+        {
+          throw await hardFailure(
+            ApprovalDenied,
+            step.id,
+            `${step.id}: approval refused`,
+            'approval for the step that follows',
+            'the approver refused',
+          );
+        }
+        break;
+
+      case 'operator':
+        break;
+    }
+
+    await reassertCheckpoint(step.id);
+  }
+
+  /** Get an answer, from the resolver or from whoever eventually resumes. */
+  async function obtainResponse(
+    step: PauseStep & { kind: 'pause' },
+    request: InteractionRequest,
+  ): Promise<InteractionResponse> {
+    try {
+      return resolver === undefined
+        ? await session.park(request, step.withinMs)
+        : await withBound(resolver(request), step.withinMs);
+    } catch (error) {
+      if (error instanceof PauseTimeout) {
+        throw await expiry(step, error);
+      }
+      // A resolver that throws has failed to answer, which is not the same as
+      // declining: it is a bug in the caller's policy, and treating it as a
+      // deny would silently pick one of the two answers it failed to give.
+      throw await hardFailure(
+        InteractionFailed,
+        step.id,
+        `${step.id}: the resolver threw`,
+        `an answer to the ${step.pauseKind} pause`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  /**
+   * What an unanswered pause becomes.
+   *
+   * An approval that expires is treated as a **deny**, because silence is not
+   * consent — so it is the same error class a refusal produces. The others are
+   * a plain expiry. Either way it is a hard failure with evidence rather than a
+   * hang, which is what "every pause is bounded" buys.
+   */
+  async function expiry(
+    step: PauseStep & { kind: 'pause' },
+    timeout: PauseTimeout,
+  ): Promise<ReplayError> {
+    const observed =
+      timeout.expiredBy === 'ttl'
+        ? `nobody resumed the parked run within its TTL (${String(timeout.waitedMs)}ms)`
+        : `nobody answered within ${String(step.withinMs)}ms`;
+
+    return hardFailure(
+      step.pauseKind === 'approval' ? ApprovalDenied : PauseExpired,
+      step.id,
+      `${step.id}: ${observed}`,
+      step.pauseKind === 'approval'
+        ? 'an approval, since an expired approval is a deny'
+        : `an answer to the ${step.pauseKind} pause`,
+      observed,
+    );
+  }
+
+  /**
+   * Re-assert the last checkpoint that passed.
+   *
+   * After a human touches the session the flow cannot assume where it is, so
+   * resume validates a known state before continuing; a mismatch is a hard
+   * failure, not a blind continuation. A pause with no checkpoint behind it
+   * re-asserts nothing, because there is no known state to return to.
+   */
+  async function reassertCheckpoint(stepId: string): Promise<void> {
+    const checkpoint = lastCheckpoint;
+    if (checkpoint === undefined) {
+      return;
+    }
+
+    const resolution = await resolveTarget(page, checkpoint.target, 'present', timeoutMs);
+    if (!resolution.found) {
+      record({ kind: 'checkpoint', satisfied: false }, checkpoint.id);
+      throw await hardFailure(
+        CheckpointFailed,
+        stepId,
+        `${stepId}: the session did not come back where it was left`,
+        `${checkpoint.id} to still hold: ${describeChain(checkpoint.target)}`,
+        'the page is no longer the one the flow paused on',
+      );
+    }
+
+    record({ kind: 'checkpoint', satisfied: true }, checkpoint.id);
+  }
+
+  /** Where the browser is, for control-transfer evidence. */
+  function where(): string {
+    try {
+      return redactUrl(page.url(), policy);
+    } catch {
+      // The context is gone — a TTL killed it. Its absence is the evidence.
+      return '(session closed)';
+    }
+  }
+
+  /**
+   * Record the verdict and build the error, so the two cannot disagree.
+   *
+   * Every hard failure comes through here, which is what makes "attachments
+   * on triggers only" a property rather than a convention — there is one
+   * place a failure is written, so there is one place capture can happen and
+   * one place it can be forgotten.
+   */
+  async function hardFailure(
+    Class: new (message: string, detail: ReplayErrorDetail) => ReplayError,
+    stepId: string,
+    message: string,
+    expected: string,
+    observed: string,
+  ): Promise<ReplayError> {
+    await recordWithCapture(
+      { kind: 'error', category: 'hard-failure', expected, observed },
+      stepId,
+      'hard-failure',
+      page,
+    );
+    record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
+    return new Class(message, { runId, step: stepId, expected, observed });
+  }
+
+  /**
+   * Whether each declared detector matches, in declaration order.
+   *
+   * A detector is a predicate, so several matches is not ambiguity: "is 'No
+   * such account' on this page" has one answer whether the phrase appears in a
+   * heading, a banner, or both.
+   */
+  async function evaluateDetectors(outcomes: readonly OutcomeDeclaration[]): Promise<boolean[]> {
+    const matched: boolean[] = [];
+    for (const outcome of outcomes) {
+      const resolution = await resolveTarget(page, outcome.detector, 'present', 0);
+      matched.push(resolution.found);
+    }
+    return matched;
+  }
+}
+
+/**
+ * Run a flow: open an execution, walk every step, and end exactly one of three
+ * ways.
  *
  * The overloads are the master-function contract: a caller that supplies a
  * resolver never handles the `suspended` arm, because with somewhere to ask the
@@ -191,21 +1208,17 @@ export function runFlow<I extends FieldSet, A>(
   input: Infer<I>,
   options: RunOptions = {},
 ): Promise<A | Suspended> {
-  const ownsBrowser = options.browser === undefined;
-  let browser: Browser | undefined = options.browser;
-  let context: BrowserContext | undefined;
+  let execution: Execution | undefined;
 
-  // Closing the context always, and the browser only where the engine opened
-  // it, keeps the standing rule that the engine never closes a browser it did
-  // not open — even when a TTL is what is doing the closing.
-  const dispose = async (): Promise<void> => {
-    await context?.close().catch(() => undefined);
-    if (ownsBrowser) {
-      await browser?.close().catch(() => undefined);
-    }
-  };
-
-  const session = new RunSession({ ttlMs: options.ttlMs ?? DEFAULT_PARK_TTL_MS, dispose });
+  // The session exists before the browser does: `runFlow` returns its
+  // settlement immediately, so a run that parks can hand the caller a
+  // `Suspended` while the work goes on detached.
+  const session = new RunSession({
+    ttlMs: options.ttlMs ?? DEFAULT_PARK_TTL_MS,
+    dispose: async () => {
+      await execution?.close();
+    },
+  });
 
   void execute().then(
     (answer) => {
@@ -219,875 +1232,26 @@ export function runFlow<I extends FieldSet, A>(
   return session.settlement as Promise<A | Suspended>;
 
   async function execute(): Promise<A> {
-    const runId =
-      options.runId ?? `run_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-    const emit = options.record ?? createEmitter(options.destination ?? DEFAULT_DESTINATION);
-    // What `dataClasses` permits this run to capture. Computed once: it is a
-    // property of the capability, not a judgement made fresh on each page.
-    const policy = evidencePolicyFor(flow.effects.dataClasses);
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const retries = options.retries ?? DEFAULT_RETRIES;
-    const clock = options.now ?? ((): Date => new Date());
-    const { resolver } = options;
-
-    const entries = createEntryFactory(
-      {
-        runId,
-        capabilityId: flow.id,
-        capabilityVersion: options.capabilityVersion ?? '0.0.0',
-        phase: options.phase ?? 'replay',
-      },
-      options.now === undefined ? {} : { now: options.now },
-    );
-
-    const record = (body: EntryBody, stepId?: string, evidence?: EntryEvidence): Entry => {
-      const entry = entries.entry(body, stepId, evidence);
-      emit(entry);
-      return entry;
-    };
-
-    /**
-     * Record an entry that a trigger hangs attachments off.
-     *
-     * The three triggers are the only moments rich capture happens: a hard
-     * failure, a control transfer, and the `.commit()` step. Capture runs
-     * *before* the entry is stamped, so the files can be named for the `seq`
-     * the entry is about to carry and the reference is right the first time.
-     */
-    const recordWithCapture = async (
-      body: EntryBody,
-      stepId: string | undefined,
-      trigger: AttachmentTrigger,
-      page: Page | undefined,
-    ): Promise<Entry> => {
-      const seq = entries.nextSeq;
-
-      if (page === undefined) {
-        return record(body, stepId);
-      }
-
-      if (options.attachmentDir === undefined) {
-        return record(body, stepId, {
-          attachmentsSkipped: 'no attachment directory is configured',
-        });
-      }
-
-      try {
-        const attachments = await capture({
-          page,
-          dir: options.attachmentDir,
-          runId,
-          seq,
-          trigger,
-          policy,
-        });
-        return record(body, stepId, { attachments });
-      } catch (error) {
-        // A capture that fails must not turn a diagnosable failure into an
-        // undiagnosable one, so it is noted and the entry still goes out.
-        return record(body, stepId, {
-          attachmentsSkipped: error instanceof Error ? error.message : 'capture failed',
-        });
-      }
-    };
-
-    record({
-      kind: 'run.started',
-      inputNames: Object.keys(flow.input),
-      secretInputNames: Object.entries(flow.input)
-        .filter(([, field]) => field.kind === 'secret')
-        .map(([name]) => name),
-      dataClasses: flow.effects.dataClasses,
-      effectsDeclared: flow.effectsDeclared,
-    });
-
-    // Before a browser opens. A flow that provably cannot satisfy its own
-    // declaration — an irreversible commit no approval precedes, a
-    // `securityEffect` capability asked to run with nobody watching — is refused
-    // rather than half-run: the reason is knowable from the artifact alone, and
-    // logging in first to discover it buys nothing. The run is recorded as
-    // started and failed all the same, because a refusal a caller cannot see in
-    // the record is indistinguishable from a run that never happened.
-    const violation = checkSafety(flow, { headless: options.headless ?? true });
-    if (violation !== undefined) {
-      record(
-        {
-          kind: 'error',
-          category: 'hard-failure',
-          expected: violation.expected,
-          observed: violation.observed,
-        },
-        violation.step,
-      );
-      record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
-      throw new EffectsRefused(`${violation.step}: ${violation.expected}`, {
-        runId,
-        step: violation.step,
-        expected: violation.expected,
-        observed: violation.observed,
-      });
-    }
-
-    browser ??= await chromium.launch({ headless: options.headless ?? true });
-    const openBrowser = browser;
-
-    // Origins the caller is entitled to reach. The entry point's own origin is
-    // added when `.open()` resolves it: the caller chose where to point the
-    // capability, so the allowlist is not there to second-guess that — it bounds
-    // everywhere *else* the automation could be taken.
-    const allowed = new Set<HostPattern>(options.allowlist ?? flow.declaredAllowlist);
-
-    let blocked: { url: string; reason: string } | undefined;
-    /**
-     * The most recent checkpoint that passed.
-     *
-     * Kept because resume re-asserts it: after a human touches the session the
-     * flow cannot assume where it is, so it validates a known state before
-     * continuing rather than driving blind into whatever is on screen.
-     */
-    let lastCheckpoint: { id: string; target: TargetChain } | undefined;
-    /**
-     * The `seq` of the `pause` entry that most recently approved something.
-     *
-     * `null` where none has. An `effect.performed` carrying `null` is exactly how
-     * a missing approval shows up in the record: present and unlinked, rather
-     * than absent and unnoticed.
-     */
-    let approvedBySeq: number | null = null;
+    execution = await openExecution(flow, input, { ...options, session });
+    const open = execution;
 
     try {
-      context = await openBrowser.newContext();
-      const page = await context.newPage();
-
-      const isMainDocument = (request: Request): boolean =>
-        request.resourceType() === 'document' && request.frame() === page.mainFrame();
-
-      // Every navigation is recorded, redirect hops included. `page.route` is not
-      // enough on its own: it fires for the request the engine makes and not for
-      // the hops the browser follows, which is exactly the case the design cares
-      // about — an allowed host can redirect off-list.
-      page.on('request', (request: Request) => {
-        if (!isMainDocument(request)) {
-          return;
+      for (const step of flow.steps) {
+        const reached = await open.perform(step);
+        if (reached !== undefined) {
+          open.finishedWith({ ending: 'outcome', status: describeAnswer(reached.answer) });
+          return reached.answer as A;
         }
-        const decision = checkAllowlist(request.url(), [...allowed]);
-        record({
-          kind: 'navigation',
-          // Judged on the real URL, recorded through `dataClasses`: an
-          // application that puts a reference in a query string would otherwise
-          // write a value the caller supplied straight into the record.
-          url: redactUrl(request.url(), policy),
-          allowed: decision.allowed,
-          ...(decision.allowed ? { pattern: decision.pattern } : { reason: decision.reason }),
-        });
-      });
-
-      // Enforcement lives where the DSL performs the navigation, because the
-      // decision is per navigation: a process-level network permission cannot tell
-      // a legitimate page load from one an injection asked for. This aborts the
-      // request the engine itself issues; a redirect off-list is caught by
-      // `enforceResolvedUrl` below, on the URL the navigation actually reached.
-      await page.route('**/*', async (route: Route) => {
-        if (!isMainDocument(route.request())) {
-          await route.continue();
-          return;
-        }
-
-        const decision = checkAllowlist(route.request().url(), [...allowed]);
-        if (decision.allowed) {
-          await route.continue();
-        } else {
-          blocked = { url: route.request().url(), reason: decision.reason };
-          await route.abort('blockedbyclient');
-        }
-      });
-
-      const extracted: Record<string, unknown> = {};
-      /**
-       * What `.pauseForInput()` has obtained so far, passed to every accessor as
-       * its second argument. Separate from `input` because it has different
-       * provenance: asked for mid-run, never through a field declaration.
-       */
-      const obtained: Record<string, Secret> = {};
-
-      try {
-        for (const step of flow.steps) {
-          await runStep(step);
-        }
-      } catch (error) {
-        if (error instanceof Terminated) {
-          record({
-            kind: 'run.finished',
-            status: { ending: 'outcome', status: describeAnswer(error.answer) },
-          });
-          return error.answer as A;
-        }
-        throw error;
       }
 
-      const map = flow.result;
-      if (map === undefined) {
-        throw new CheckpointFailed('flow declares no result', {
-          runId,
-          step: flow.id,
-          expected: 'a .returns() declaration',
-          observed: 'none',
-        });
-      }
-
-      const answer = (map as (values: Record<string, unknown>) => unknown)(extracted);
-      record({ kind: 'run.finished', status: { ending: 'success' } });
+      const answer = open.result();
+      open.finishedWith({ ending: 'success' });
       return answer as A;
-
-      // ---- the step cycle -------------------------------------------------
-
-      async function runStep(step: Step): Promise<void> {
-        record({ kind: 'step.started', verb: step.kind }, step.id);
-
-        if (step.kind === 'pause') {
-          // Never round the retry-then-detect ladder. A refused approval or an
-          // unanswered escalation is already a verdict, and re-asking would turn a
-          // deny into a poll; letting the detectors see it would let an unrelated
-          // banner explain away a human's decision.
-          await runPause(step);
-          return;
-        }
-
-        for (let attempt = 0; ; attempt++) {
-          const failure = await attemptStep(step);
-
-          if (failure === undefined) {
-            return;
-          }
-
-          const attemptsRemaining = isRetryable(step) ? retries - attempt : 0;
-          const decision = decideVerification({
-            satisfied: false,
-            detectors: await evaluateDetectors(flow.outcomes),
-            recovery: { available: isRetryable(step), attemptsRemaining },
-          });
-
-          switch (decision.action) {
-            case 'recover':
-              // Recorded as evidence only; recovery never reaches the caller.
-              record({ kind: 'retry', reason: failure.observed, attempt: attempt + 1 }, step.id);
-              continue;
-
-            case 'outcome': {
-              const declaration = flow.outcomes[decision.index];
-              if (declaration === undefined) {
-                break;
-              }
-              record(
-                { kind: 'outcome.matched', detectorIndex: decision.index, status: declaration.id },
-                step.id,
-              );
-              throw new Terminated(
-                (declaration.map as (value: Infer<I>, got: Record<string, Secret>) => unknown)(
-                  input,
-                  obtained,
-                ),
-              );
-            }
-
-            case 'proceed':
-            case 'fail':
-              break;
-          }
-
-          throw blocked === undefined
-            ? await hardFailure(
-                CheckpointFailed,
-                step.id,
-                `${step.id}: ${failure.observed}`,
-                failure.expected,
-                failure.observed,
-              )
-            : await hardFailure(
-                NavigationBlocked,
-                step.id,
-                `${step.id}: navigation left the allowlist`,
-                `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
-                `${redactUrl(blocked.url, policy)} (${blocked.reason})`,
-              );
-        }
-      }
-
-      /**
-       * One attempt at a step. Returns `undefined` on success, or what went wrong.
-       *
-       * Ambiguity is not returned as a failure: it throws on the spot, because it
-       * is never recoverable and never a business outcome — two elements answering
-       * to the same description means the recorded intent is unclear, and no
-       * amount of waiting or detecting changes that.
-       */
-      async function attemptStep(
-        step: Exclude<Step, PauseStep & { kind: 'pause' }>,
-      ): Promise<StepFailure | undefined> {
-        if (step.kind === 'open') {
-          return openEntryPoint(
-            step.url as unknown as (value: Infer<I>, got: Record<string, Secret>) => string,
-            step.id,
-          );
-        }
-
-        if (step.kind === 'pauseUntil') {
-          return waitForSurface(step);
-        }
-
-        if (step.kind === 'optional') {
-          const resolution = await resolveTarget(page, step.target, 'unique', timeoutMs);
-          if (!resolution.found) {
-            // A no-op when the target does not resolve — an intermittent consent
-            // screen that simply is not there today.
-            return undefined;
-          }
-          for (const inner of step.steps) {
-            const failure = await attemptStep(inner);
-            if (failure !== undefined) {
-              return failure;
-            }
-          }
-          return undefined;
-        }
-
-        if (step.kind === 'oneOf') {
-          for (const arm of step.arms) {
-            const resolution = await resolveTarget(page, arm.when, 'present', timeoutMs);
-            if (!resolution.found) {
-              continue;
-            }
-            for (const inner of arm.steps) {
-              const failure = await attemptStep(inner);
-              if (failure !== undefined) {
-                return failure;
-              }
-            }
-            return undefined;
-          }
-          return {
-            expected: `one of ${String(step.arms.length)} expected screens`,
-            observed: 'no arm matched',
-          };
-        }
-
-        const chain = stepTarget(step);
-        if (chain === undefined) {
-          return undefined;
-        }
-
-        const resolution = await resolveTarget(page, chain, 'unique', timeoutMs);
-
-        if (!resolution.found) {
-          if (resolution.reason === 'ambiguous') {
-            throw await hardFailure(
-              TargetAmbiguous,
-              step.id,
-              `${step.id}: ${String(resolution.matches)} elements matched`,
-              `exactly one element for ${describeChain(chain)}`,
-              `${String(resolution.matches)} elements matched strategy "${resolution.strategy}"`,
-            );
-          }
-          return {
-            expected: describeChain(chain),
-            observed: 'no strategy in the chain resolved',
-          };
-        }
-
-        return act(step, resolution);
-      }
-
-      async function act(
-        step: Exclude<
-          Step,
-          { kind: 'open' } | { kind: 'optional' } | { kind: 'oneOf' } | PauseStep
-        >,
-        resolution: Resolution & { found: true },
-      ): Promise<StepFailure | undefined> {
-        try {
-          switch (step.kind) {
-            case 'fillForm': {
-              const raw = (
-                step.value as (value: Infer<I>, got: Record<string, Secret>) => FillValue
-              )(input, obtained);
-              // A secret reaches the page only through an explicit `.reveal()`,
-              // and this is the one place in the codebase that call is made.
-              const value = typeof raw === 'string' ? raw : raw.reveal();
-              await resolution.locator.fill(value, { timeout: timeoutMs });
-              break;
-            }
-
-            case 'pressButton':
-              await resolution.locator.click({ timeout: timeoutMs });
-              await settle();
-              enforceResolvedUrl(step.id);
-              break;
-
-            case 'commit':
-              // The same rule as the pre-flight check, asserted on the run
-              // rather than on the artifact: that an approval was actually
-              // *granted*, here, before the point of no return. Replay reaches
-              // this only through a flow the pre-flight already read, so it is
-              // the discovery phase this is really for — there the flow grows a
-              // step at a time and a check made before the run started cannot
-              // have seen the commit the model is about to append.
-              if (requiresApproval(flow.effects) && approvedBySeq === null) {
-                throw await hardFailure(
-                  EffectsRefused,
-                  step.id,
-                  `${step.id}: the declared effects require an approval before this commit`,
-                  'an approval granted earlier in this run',
-                  'none had been when the commit was reached',
-                );
-              }
-              await resolution.locator.click({ timeout: timeoutMs });
-              await settle();
-              enforceResolvedUrl(step.id);
-              // Someone auditing a run should be able to answer *did anything
-              // irreversible happen, and was it authorized* by reading the
-              // record, not by inferring it from a `step.finished` on a button
-              // press. This is the entry that answers it.
-              await recordWithCapture(
-                {
-                  kind: 'effect.performed',
-                  dimension: 'reversible',
-                  value: flow.effects.reversible,
-                  approvedBySeq,
-                },
-                step.id,
-                'commit',
-                page,
-              );
-              // Spent. An approval authorizes the step that follows — that is
-              // what the flow asked a human — so a second irreversible action
-              // needs a second one. Carrying it forward would let one approval
-              // stand for actions the approver was never shown, and would write
-              // that claim into the record.
-              approvedBySeq = null;
-              break;
-
-            case 'choose': {
-              const value = (
-                step.value as unknown as (value: Infer<I>, got: Record<string, Secret>) => string
-              )(input, obtained);
-              await resolution.locator.selectOption(value, { timeout: timeoutMs });
-              break;
-            }
-
-            case 'checkpoint':
-              record({ kind: 'checkpoint', satisfied: true }, step.id);
-              lastCheckpoint = { id: step.id, target: step.target };
-              break;
-
-            case 'extract': {
-              const text = (await resolution.locator.textContent({ timeout: timeoutMs })) ?? '';
-              extracted[step.name] = step.parse(text.trim());
-              break;
-            }
-          }
-        } catch (error) {
-          // A hard failure raised here is already a verdict — an ambiguous target
-          // or a navigation that left the allowlist. Folding it into a step
-          // failure would send it round the retry-then-detect ladder, where it
-          // could surface as a business outcome it has nothing to do with.
-          if (error instanceof ReplayError) {
-            throw error;
-          }
-          return {
-            expected: describeChain(stepTarget(step) ?? ([] as unknown as TargetChain)),
-            observed:
-              error instanceof Error ? (error.message.split('\n')[0] ?? 'failed') : 'failed',
-          };
-        }
-
-        record(
-          {
-            kind: 'step.finished',
-            resolvedBy: resolution.strategy,
-            strategyIndex: resolution.index,
-            // A fallback winning is the drift signal: the application changed in a
-            // way the artifact survived by luck.
-            drifted: isDrift(resolution),
-          },
-          step.id,
-        );
-
-        return undefined;
-      }
-
-      async function openEntryPoint(
-        accessor: (value: Infer<I>, got: Record<string, Secret>) => string,
-        stepId: string,
-      ): Promise<StepFailure | undefined> {
-        const url = accessor(input, obtained);
-
-        try {
-          allowed.add(new URL(url).hostname);
-        } catch {
-          return { expected: 'a URL', observed: redactUrl(url, policy) };
-        }
-
-        try {
-          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs * 3 });
-        } catch (error) {
-          if (blocked !== undefined) {
-            return {
-              expected: 'a navigation within the allowlist',
-              observed: redactUrl(blocked.url, policy),
-            };
-          }
-          throw new SurfaceUnavailable(`${stepId}: could not reach ${redactUrl(url, policy)}`, {
-            runId,
-            step: stepId,
-            expected: `a page at ${redactUrl(url, policy)}`,
-            observed:
-              error instanceof Error
-                ? (error.message.split('\n')[0] ?? 'unreachable')
-                : 'unreachable',
-          });
-        }
-
-        enforceResolvedUrl(stepId);
-        record(
-          { kind: 'step.finished', resolvedBy: 'css', strategyIndex: 0, drifted: false },
-          stepId,
-        );
-        return undefined;
-      }
-
-      /** Let a navigation caused by a click finish before the next step looks. */
-      async function settle(): Promise<void> {
-        await page
-          .waitForLoadState('domcontentloaded', { timeout: timeoutMs })
-          .catch(() => undefined);
-      }
-
-      /**
-       * Judge where the navigation actually landed.
-       *
-       * The check applies to the **resolved** URL after redirects, since an
-       * allowed host can redirect off-list — and a redirect is followed by the
-       * browser without the engine's request interception seeing it. Leaving the
-       * replay allowlist is not a policy question: the list is computed rather
-       * than confirmed, so leaving it means the application changed.
-       */
-      function enforceResolvedUrl(stepId: string): void {
-        const current = page.url();
-        if (current === 'about:blank') {
-          return;
-        }
-
-        const decision = checkAllowlist(current, [...allowed]);
-        if (decision.allowed) {
-          return;
-        }
-
-        const recorded = redactUrl(current, policy);
-
-        record(
-          {
-            kind: 'error',
-            category: 'hard-failure',
-            expected: `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
-            observed: recorded,
-          },
-          stepId,
-        );
-        record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
-
-        throw new NavigationBlocked(`${stepId}: navigation resolved outside the allowlist`, {
-          runId,
-          step: stepId,
-          expected: `a navigation within ${[...allowed].join(', ') || '(no hosts)'}`,
-          observed: `${recorded} (${decision.reason})`,
-        });
-      }
-
-      // ---- pause and resume -----------------------------------------------
-
-      /**
-       * Wait for a surface, with a bound. Resolved by polling, so nobody is asked.
-       *
-       * Its expiry is returned as an ordinary step failure rather than thrown, so
-       * it goes round the verification ladder — retry, then the declared
-       * detectors, then a hard failure. That is deliberate: a screen that never
-       * arrived is exactly the condition an outcome detector may legitimately
-       * explain, and "no such account" reaching the caller as a timeout would be
-       * the taxonomy inverted.
-       */
-      async function waitForSurface(
-        step: PauseStep & { kind: 'pauseUntil' },
-      ): Promise<StepFailure | undefined> {
-        const startedAt = Date.now();
-        record(
-          {
-            kind: 'pause',
-            reason: 'awaiting-surface',
-            name: step.id,
-            declared: true,
-            expiresAt: new Date(clock().getTime() + step.withinMs).toISOString(),
-          },
-          step.id,
-        );
-
-        const resolution = await resolveTarget(page, step.target, 'present', step.withinMs);
-        if (!resolution.found) {
-          return {
-            expected: describeChain(step.target),
-            observed: `the surface did not arrive within ${String(step.withinMs)}ms`,
-          };
-        }
-
-        record(
-          {
-            kind: 'resume',
-            reason: 'awaiting-surface',
-            resolvedBy: 'polling',
-            waitedMs: Date.now() - startedAt,
-          },
-          step.id,
-        );
-        return undefined;
-      }
-
-      /**
-       * Ask a human, or park because there is nobody to ask.
-       *
-       * A pause named in the flow is part of the contract, not an incident: MFA on
-       * every login is expected, and a capability that declares it is attended
-       * rather than broken. That is why this records `declared: true` and does not
-       * escalate — only an *undeclared* pause is an escalation, and during replay
-       * one cannot occur, because the DSL is the only way to stop.
-       */
-      async function runPause(step: PauseStep & { kind: 'pause' }): Promise<void> {
-        const startedAt = Date.now();
-        const reason = PAUSE_REASON[step.pauseKind];
-        const expiresAt = new Date(clock().getTime() + step.withinMs).toISOString();
-        const request: InteractionRequest = {
-          kind: step.pauseKind,
-          name: step.name,
-          prompt: step.prompt,
-          // Every value obtained mid-run is a secret: it has never been through
-          // the field declarations, so nothing else would redact it.
-          secret: step.pauseKind === 'input',
-          expiresAt,
-        };
-
-        const holder = resolver === undefined ? 'caller' : 'resolver';
-        const pauseEntry = record(
-          { kind: 'pause', reason, name: step.name, declared: true, expiresAt },
-          step.id,
-        );
-        await recordWithCapture(
-          { kind: 'control.transferred', holder, stateBefore: where() },
-          step.id,
-          'control-transfer',
-          page,
-        );
-
-        const response = await obtainResponse(step, request);
-        const heldMs = Date.now() - startedAt;
-
-        const check = checkResponse(step.pauseKind, response);
-        if (!check.ok) {
-          throw await hardFailure(
-            InteractionFailed,
-            step.id,
-            `${step.id}: a ${step.pauseKind} answered with the wrong kind of value`,
-            check.expected,
-            check.observed,
-          );
-        }
-
-        await recordWithCapture(
-          { kind: 'control.returned', holder, heldMs, stateAfter: where() },
-          step.id,
-          'control-transfer',
-          page,
-        );
-        record({ kind: 'resume', reason, resolvedBy: holder, waitedMs: heldMs }, step.id);
-
-        switch (step.pauseKind) {
-          case 'input':
-            obtained[step.name] = response as Secret;
-            break;
-
-          case 'approval':
-            if (response === true) {
-              // The `seq` an `effect.performed` will point at. Linking them is
-              // what turns the effects declaration from a claim in the contract
-              // into something observable after the fact.
-              approvedBySeq = pauseEntry.seq;
-              break;
-            }
-            {
-              throw await hardFailure(
-                ApprovalDenied,
-                step.id,
-                `${step.id}: approval refused`,
-                'approval for the step that follows',
-                'the approver refused',
-              );
-            }
-            break;
-
-          case 'operator':
-            break;
-        }
-
-        await reassertCheckpoint(step.id);
-      }
-
-      /** Get an answer, from the resolver or from whoever eventually resumes. */
-      async function obtainResponse(
-        step: PauseStep & { kind: 'pause' },
-        request: InteractionRequest,
-      ): Promise<InteractionResponse> {
-        try {
-          return resolver === undefined
-            ? await session.park(request, step.withinMs)
-            : await withBound(resolver(request), step.withinMs);
-        } catch (error) {
-          if (error instanceof PauseTimeout) {
-            throw await expiry(step, error);
-          }
-          // A resolver that throws has failed to answer, which is not the same as
-          // declining: it is a bug in the caller's policy, and treating it as a
-          // deny would silently pick one of the two answers it failed to give.
-          throw await hardFailure(
-            InteractionFailed,
-            step.id,
-            `${step.id}: the resolver threw`,
-            `an answer to the ${step.pauseKind} pause`,
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-      }
-
-      /**
-       * What an unanswered pause becomes.
-       *
-       * An approval that expires is treated as a **deny**, because silence is not
-       * consent — so it is the same error class a refusal produces. The others are
-       * a plain expiry. Either way it is a hard failure with evidence rather than a
-       * hang, which is what "every pause is bounded" buys.
-       */
-      async function expiry(
-        step: PauseStep & { kind: 'pause' },
-        timeout: PauseTimeout,
-      ): Promise<ReplayError> {
-        const observed =
-          timeout.expiredBy === 'ttl'
-            ? `nobody resumed the parked run within its TTL (${String(timeout.waitedMs)}ms)`
-            : `nobody answered within ${String(step.withinMs)}ms`;
-
-        return hardFailure(
-          step.pauseKind === 'approval' ? ApprovalDenied : PauseExpired,
-          step.id,
-          `${step.id}: ${observed}`,
-          step.pauseKind === 'approval'
-            ? 'an approval, since an expired approval is a deny'
-            : `an answer to the ${step.pauseKind} pause`,
-          observed,
-        );
-      }
-
-      /**
-       * Re-assert the last checkpoint that passed.
-       *
-       * After a human touches the session the flow cannot assume where it is, so
-       * resume validates a known state before continuing; a mismatch is a hard
-       * failure, not a blind continuation. A pause with no checkpoint behind it
-       * re-asserts nothing, because there is no known state to return to.
-       */
-      async function reassertCheckpoint(stepId: string): Promise<void> {
-        const checkpoint = lastCheckpoint;
-        if (checkpoint === undefined) {
-          return;
-        }
-
-        const resolution = await resolveTarget(page, checkpoint.target, 'present', timeoutMs);
-        if (!resolution.found) {
-          record({ kind: 'checkpoint', satisfied: false }, checkpoint.id);
-          throw await hardFailure(
-            CheckpointFailed,
-            stepId,
-            `${stepId}: the session did not come back where it was left`,
-            `${checkpoint.id} to still hold: ${describeChain(checkpoint.target)}`,
-            'the page is no longer the one the flow paused on',
-          );
-        }
-
-        record({ kind: 'checkpoint', satisfied: true }, checkpoint.id);
-      }
-
-      /** Where the browser is, for control-transfer evidence. */
-      function where(): string {
-        try {
-          return redactUrl(page.url(), policy);
-        } catch {
-          // The context is gone — a TTL killed it. Its absence is the evidence.
-          return '(session closed)';
-        }
-      }
-
-      /**
-       * Record the verdict and build the error, so the two cannot disagree.
-       *
-       * Every hard failure comes through here, which is what makes "attachments
-       * on triggers only" a property rather than a convention — there is one
-       * place a failure is written, so there is one place capture can happen and
-       * one place it can be forgotten.
-       */
-      async function hardFailure(
-        Class: new (message: string, detail: ReplayErrorDetail) => ReplayError,
-        stepId: string,
-        message: string,
-        expected: string,
-        observed: string,
-      ): Promise<ReplayError> {
-        await recordWithCapture(
-          { kind: 'error', category: 'hard-failure', expected, observed },
-          stepId,
-          'hard-failure',
-          page,
-        );
-        record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
-        return new Class(message, { runId, step: stepId, expected, observed });
-      }
-
-      /**
-       * Whether each declared detector matches, in declaration order.
-       *
-       * A detector is a predicate, so several matches is not ambiguity: "is 'No
-       * such account' on this page" has one answer whether the phrase appears in a
-       * heading, a banner, or both.
-       */
-      async function evaluateDetectors(
-        outcomes: readonly OutcomeDeclaration[],
-      ): Promise<boolean[]> {
-        const matched: boolean[] = [];
-        for (const outcome of outcomes) {
-          const resolution = await resolveTarget(page, outcome.detector, 'present', 0);
-          matched.push(resolution.found);
-        }
-        return matched;
-      }
     } catch (error) {
-      if (!(error instanceof ReplayError) && !(error instanceof Terminated)) {
-        record({
-          kind: 'error',
-          category: 'hard-failure',
-          expected: 'the flow to run to completion',
-          observed: error instanceof Error ? error.message : String(error),
-        });
-      }
+      await open.failedWith(error);
       throw error;
     } finally {
-      await context?.close().catch(() => undefined);
-      if (ownsBrowser) {
-        await openBrowser.close().catch(() => undefined);
-      }
+      await open.close();
     }
   }
 }
