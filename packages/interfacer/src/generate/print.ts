@@ -366,9 +366,22 @@ export function printFlow(flow: Flow<FieldSet, unknown>, imports: Imports): stri
   const steps = flow.steps.map((step) => printStep(step, imports));
   const outcomes = flow.outcomes.map((outcome) => printOutcome(outcome, imports));
 
+  // A flow with no `.returns()` is a run that stopped before it reached the
+  // goal — the budget ran out, or the stall guard fired. It is still written:
+  // a re-run reads the project like any other and continues from here rather
+  // than starting over, which only works if what was discovered is on disk.
   if (flow.result === undefined) {
-    throw new UnprintableFlow(flow.id, 'the flow declares no .returns()');
+    return [
+      '// PARTIAL. Discovery stopped before it reached the goal, so this flow',
+      '// declares no .returns() and cannot answer yet. Re-run Interfacer here',
+      '// to continue from these steps.',
+      head,
+      ...steps,
+      ...outcomes,
+      '  ;',
+    ].join('\n');
   }
+
   const result = `  .returns(${printValueSource(
     sourceOf(flow.result, flow.id, 'the result map'),
     imports,

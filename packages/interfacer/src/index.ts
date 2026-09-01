@@ -105,6 +105,18 @@ export { appendStep, answerFor, TOOLS, TOOL_NAMES, ToolArgumentError } from './a
 
 export { discover, type Discovery, type DiscoveryOptions, type Ending } from './agent/loop.js';
 
+export { fieldsFor, flowFor, liveValues } from './generation/flow.js';
+
+export { rerunFlow, type Rerun } from './generation/rerun.js';
+
+export { provokeOutcomes, type Provocations, type Provoked } from './generation/provoke.js';
+
+export { inspect, type InspectOptions, type Proposals } from './generation/inspect.js';
+
+export { readSeed, type Seed } from './generation/seed.js';
+
+export { generate, type Generation, type GenerationOptions } from './generation/generation.js';
+
 export {
   printChain,
   printEffects,

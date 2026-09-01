@@ -14,6 +14,7 @@
  */
 import {
   addUsage,
+  describeTarget,
   isReplayError,
   openExecution,
   ratesFor,
@@ -30,7 +31,8 @@ import {
   type TargetChain,
 } from '@interfacer/dsl';
 
-import type { Ask } from '../ask.js';
+import { accepted, type Ask } from '../ask.js';
+import { rerunFlow, type Rerun } from '../generation/rerun.js';
 import {
   DEFAULT_MODEL,
   type ContractBrief,
@@ -39,7 +41,7 @@ import {
   type ToolCall,
   type ToolResult,
 } from './decide.js';
-import { answerFor, appendStep, TOOL_NAMES, TOOLS, ToolArgumentError } from './tools.js';
+import { answerFor, appendStep, bindValue, TOOL_NAMES, TOOLS, ToolArgumentError } from './tools.js';
 
 /**
  * How many turns may pass with nothing appended and the page unchanged.
@@ -87,10 +89,30 @@ export interface DiscoveryOptions<I extends FieldSet = FieldSet> extends RunOpti
   readonly model?: string;
   /** The hard cap, in dollars. The model is told it; the harness enforces it. */
   readonly budgetUsd?: number;
+  /**
+   * What to do at the cap, where there is somebody to ask.
+   *
+   * Interactively, reaching the ceiling is an approval rather than a failure:
+   * approving raises it and the run continues in the same session. Returning
+   * nothing — or omitting this, which is what an unattended run does — stops
+   * the run, and the partial flow is written for a re-run to continue from.
+   */
+  readonly raiseBudget?: (spent: number, cap: number) => Promise<number | undefined>;
   readonly maxTurns?: number;
   readonly stallTurns?: number;
   /** Declared outcomes still needing a detector, for the model's brief. */
   readonly outcomes?: readonly string[];
+  /**
+   * The flow already has steps: verify them before deciding anything new.
+   *
+   * This is seeded discovery. A sibling project copied to a new tenant is
+   * verified rather than trusted — its steps are re-performed against the new
+   * application, the ones that still resolve are kept, and the run picks up
+   * from the first one that does not, which is retracted along with everything
+   * after it. Copying a project and editing the URL keeps a sibling's steps
+   * unchecked; copying it and running Interfacer keeps only what still works.
+   */
+  readonly verifySeed?: boolean;
 }
 
 /** Why discovery stopped. */
@@ -105,6 +127,8 @@ export type Ending =
 
 export interface Discovery<I extends FieldSet = FieldSet> {
   readonly ending: Ending;
+  /** What a seeded run kept and where it stopped, where one was verified. */
+  readonly seeded?: Rerun;
   /** The flow as it stands. Partial where the run did not reach the goal. */
   readonly flow: Flow<I, unknown>;
   readonly spend: Spend;
@@ -131,9 +155,14 @@ export async function discover<I extends FieldSet>(
 ): Promise<Discovery<I>> {
   const model = options.model ?? DEFAULT_MODEL;
   const rates = ratesFor(model);
-  const capUsd = options.budgetUsd ?? Number.POSITIVE_INFINITY;
+  let cap = options.budgetUsd ?? Number.POSITIVE_INFINITY;
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
   const stallTurns = options.stallTurns ?? DEFAULT_STALL_TURNS;
+
+  // The engine reads an input at the moment a step needs it, so this is the one
+  // object a live value ever lives in — filled as the model asks for values, and
+  // gone when the process is.
+  const live = options.input as Record<string, unknown>;
 
   const execution = await openExecution(flow, options.input, {
     ...options,
@@ -142,6 +171,29 @@ export async function discover<I extends FieldSet>(
     // the window that is already open.
     headless: options.headless ?? false,
   });
+
+  let ending: Ending | undefined;
+
+  // Seeded: walk what the seed already holds, and drop from the first step the
+  // new application refuses. Retracted last-first, because a flow is a sequence
+  // and a step after a broken one has no established place to stand.
+  let seeded: Rerun | undefined;
+  if (options.verifySeed === true && flow.steps.length > 0) {
+    seeded = await rerunFlow(execution, flow);
+    for (const step of [...flow.steps].reverse()) {
+      if (seeded.kept.includes(step)) {
+        break;
+      }
+      flow.retract(step);
+    }
+
+    // Every step still resolves and the seed already declares its result: the
+    // capability is confirmed against this tenant and there is nothing left for
+    // a model to decide. Asking it anyway would spend a turn to be told so.
+    if (seeded.stoppedAt === undefined && flow.result !== undefined) {
+      ending = 'returned';
+    }
+  }
 
   const transcript: Exchange[] = [];
   const contract: ContractBrief = {
@@ -155,7 +207,6 @@ export async function discover<I extends FieldSet>(
   let turns = 0;
   let quiet = 0;
   let lastSignature = '';
-  let ending: Ending | undefined;
   let failure: Error | undefined;
 
   const costNow = (): number => (rates === undefined ? 0 : spendCost(spend, rates));
@@ -169,9 +220,13 @@ export async function discover<I extends FieldSet>(
 
       // The harness holds the cap. The model is told the ceiling so it paces
       // itself, and being told is not a control.
-      if (costNow() >= capUsd) {
-        ending = 'budget-exhausted';
-        break;
+      if (costNow() >= cap) {
+        const raised = await options.raiseBudget?.(costNow(), cap);
+        if (raised === undefined || raised <= cap) {
+          ending = 'budget-exhausted';
+          break;
+        }
+        cap = raised;
       }
 
       const observation = await execution.observe();
@@ -194,7 +249,7 @@ export async function discover<I extends FieldSet>(
           // A copy: the state a turn was decided on must not go on changing
           // underneath whoever holds it, and the seam may keep it.
           transcript: [...transcript],
-          budget: { capUsd, spentUsd: costNow() },
+          budget: { capUsd: cap, spentUsd: costNow() },
         },
         TOOLS,
       );
@@ -247,6 +302,7 @@ export async function discover<I extends FieldSet>(
     spend,
     costUsd: costNow(),
     turns,
+    ...(seeded === undefined ? {} : { seeded }),
     ...(failure === undefined ? {} : { failure }),
   };
 
@@ -289,7 +345,8 @@ export async function discover<I extends FieldSet>(
         case 'ask': {
           const asked = call.input.question;
           const answered = await ask(typeof asked === 'string' ? asked : '');
-          say(true, answered);
+          const bound = bind(call.input.for, answered);
+          say(true, bound === undefined ? answered : `${answered} — bound to ${bound}`);
           return { appended: false };
         }
 
@@ -313,6 +370,24 @@ export async function discover<I extends FieldSet>(
           const produced = execution.result();
           say(true, `returns declared: ${JSON.stringify(produced)}`);
           return { appended: true, ending: 'returned' };
+        }
+
+        case 'commit': {
+          // The point of no return is proposed and confirmed rather than
+          // inferred: `.commit()` is marked in the flow because a person said
+          // this is the step, and an approval that came after the fact would
+          // be authorizing something already done.
+          if (options.ask !== undefined) {
+            const answered = await options.ask({
+              kind: 'confirm',
+              text: `${(call.input.target as TargetChain).map(describeTarget).join(' | ')} is the point of no return`,
+            });
+            if (!accepted(answered)) {
+              say(false, 'the user says that is not the commit; do not activate it');
+              return { appended: false };
+            }
+          }
+          return await perform(call, say);
         }
 
         default:
@@ -367,5 +442,26 @@ export async function discover<I extends FieldSet>(
     // held for the run and written nowhere — not into the project, not into the
     // record — so nothing about it reaches the artifact but its input name.
     return options.ask({ kind: 'open', text: question });
+  }
+
+  /**
+   * Hold an answer as the value of a declared input, for the rest of the run.
+   *
+   * Discovery needs real values to work with — a username that logs in, an
+   * account that exists — and the model asks for them as it needs them rather
+   * than being handed everything up front. They live in this object and nowhere
+   * else: the flow refers to inputs by accessor, so the artifact is
+   * parameterized by construction and never sees one.
+   */
+  function bind(name: unknown, answered: string): string | undefined {
+    if (typeof name !== 'string' || name === '') {
+      return undefined;
+    }
+    const declared = flow.input[name];
+    if (declared === undefined) {
+      return undefined;
+    }
+    live[name] = bindValue(declared, answered);
+    return name;
   }
 }

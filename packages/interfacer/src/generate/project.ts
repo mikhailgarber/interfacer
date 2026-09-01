@@ -16,6 +16,7 @@ import {
   interactionsOf,
   isAttended,
   requiresApproval,
+  type Effects,
   type FieldSet,
   type Flow,
   type VariantStamp,
@@ -34,6 +35,16 @@ export interface GenerateRequest {
   readonly description: string;
   readonly variant: VariantStamp;
   readonly version?: string;
+  /**
+   * The effects to emit, where discovery revised what the interview declared.
+   *
+   * `securityEffect` is proposed from what the screens gave up and confirmed
+   * afterwards, so the answer can arrive after the flow was built. The flow
+   * object cannot be re-declared, and the emitted project is what a caller and
+   * the enforcement read — so the confirmed value is emitted, and the
+   * difference is reported rather than silently dropped.
+   */
+  readonly effects?: Effects;
 }
 
 /** Path relative to the project root → file contents. */
@@ -52,6 +63,11 @@ export class GenerationRefused extends Error {
   }
 }
 
+/** What this project declares: the confirmed revision where there is one. */
+function effectsOf(request: GenerateRequest): Effects {
+  return request.effects ?? request.flow.effects;
+}
+
 /**
  * What may not be emitted at all.
  *
@@ -68,7 +84,7 @@ function refuseImpossible(request: GenerateRequest): void {
     );
   }
 
-  if (flow.effects.mutates === 'read' && flow.steps.some((step) => step.kind === 'commit')) {
+  if (effectsOf(request).mutates === 'read' && flow.steps.some((step) => step.kind === 'commit')) {
     // Hosts bound where the automation may go; `mutates` bounds what it may do
     // once there. A capability that says it only reads and contains the point of
     // no return is not a run to be refused later — it is a contradiction in the
@@ -124,7 +140,7 @@ function packageJson(request: GenerateRequest): string {
 function contract(request: GenerateRequest): string {
   const imports = new Imports();
   const fields = printFields(request.flow.input, imports);
-  const effects = printEffects(request.flow.effects);
+  const effects = printEffects(effectsOf(request));
   imports.useType('Infer');
 
   return `/**
@@ -321,6 +337,7 @@ function fill(template: string, request: GenerateRequest): string {
 /** The README: what the capability is, and how each of the three surfaces calls it. */
 function docs(request: GenerateRequest): string {
   const { flow } = request;
+  const declared = effectsOf(request);
   const fields = Object.entries(flow.input).map(
     ([name, field]) => `| \`${name}\` | ${field.kind} | ${field.description ?? ''} |`,
   );
@@ -359,17 +376,17 @@ ${answers.length === 0 ? '- success only' : answers.map((id) => `- \`${id}\``).j
 
 | dimension | declared |
 | --- | --- |
-| mutates | \`${flow.effects.mutates}\` |
-| reversible | \`${flow.effects.reversible}\` |
-| securityEffect | \`${flow.effects.securityEffect}\` |
-| scope | \`${flow.effects.scope}\` |
-| external | \`${flow.effects.external}\` |
-| financial | \`${flow.effects.financial}\` |
-| idempotent | \`${String(flow.effects.idempotent)}\` |
-| dataClasses | ${flow.effects.dataClasses.map((one) => `\`${one}\``).join(', ')} |
+| mutates | \`${declared.mutates}\` |
+| reversible | \`${declared.reversible}\` |
+| securityEffect | \`${declared.securityEffect}\` |
+| scope | \`${declared.scope}\` |
+| external | \`${declared.external}\` |
+| financial | \`${declared.financial}\` |
+| idempotent | \`${String(declared.idempotent)}\` |
+| dataClasses | ${declared.dataClasses.map((one) => `\`${one}\``).join(', ')} |
 
 ${
-  requiresApproval(flow.effects)
+  requiresApproval(declared)
     ? 'This capability requires a human approval before its point of no return, and is refused a run that cannot obtain one.\n'
     : ''
 }${

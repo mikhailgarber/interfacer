@@ -25,10 +25,12 @@ import {
   field,
   join,
   literal,
+  makeSecret,
   obtained,
   type Described,
-  type Flow,
+  type Field,
   type FieldSet,
+  type Flow,
   type Step,
   type TargetChain,
 } from '@interfacer/dsl';
@@ -219,10 +221,43 @@ export const TOOLS: readonly ToolDefinition[] = Object.freeze([
   },
   {
     name: 'ask',
-    description: 'Put a question to the human — a live value, or help when stuck. Records nothing.',
-    inputSchema: schema({ question: { type: 'string' } }, ['question']),
+    description:
+      'Put a question to the human — a live value, or help when stuck. Name the input in `for` when the answer is the value for one, and it is bound for the rest of the run. Records nothing: a live value is held in memory and written nowhere.',
+    inputSchema: schema(
+      {
+        question: { type: 'string' },
+        for: { type: 'string', description: 'The declared input this answer supplies, if any.' },
+      },
+      ['question'],
+    ),
   },
 ]);
+
+/**
+ * Bind an answer to the input it was asked for.
+ *
+ * A live value never reaches the artifact: the flow refers to inputs by
+ * accessor, so what discovery holds here is only ever the value a *replay*
+ * would be given. A `secret()` input is wrapped on the way in, because the
+ * redaction that applies to it at replay applies during discovery too.
+ */
+export function bindValue(field: Field, answer: string): unknown {
+  switch (field.kind) {
+    case 'secret':
+      return makeSecret(answer);
+    case 'number': {
+      const value = Number(answer.trim());
+      if (Number.isNaN(value)) {
+        throw new ToolArgumentError(`${answer} is not a number`);
+      }
+      return value;
+    }
+    case 'boolean':
+      return /^(y|yes|true|on)\b/i.test(answer.trim());
+    case 'text':
+      return answer;
+  }
+}
 
 export const TOOL_NAMES: ReadonlySet<string> = new Set(TOOLS.map((tool) => tool.name));
 

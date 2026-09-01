@@ -14,7 +14,14 @@
 import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
-import { credentials, interviewer, MissingCredential, type Credentials } from './agent/decide.js';
+import {
+  claude,
+  credentials,
+  interviewer,
+  MissingCredential,
+  type Credentials,
+} from './agent/decide.js';
+import { generate } from './generation/generation.js';
 import type { Contract, ContractDraft } from './interview/contract.js';
 import type { Ask } from './ask.js';
 import { interview } from './interview/interview.js';
@@ -187,12 +194,49 @@ async function main(argv: readonly string[], env: NodeJS.ProcessEnv): Promise<nu
     say(line);
   }
   say('');
-  say(`  the interview cost $${result.costUsd.toFixed(4)} over ${String(result.turns)} turns`);
+  say('interfacer: generation mode — driving the task against the application.');
   say('');
-  // Phase 10 replaces this with the switch to generation mode: the same session
-  // goes on, driving the model through the task against the live application.
-  say('Generation mode — discovering the flow and writing the project — is phase 10.');
-  return 0;
+
+  // The same session goes on. The conversation does not end when the interview
+  // does: the model asks for live values as it needs them, and the person
+  // confirms the point of no return and what the pages say the application is.
+  const generated = await generate({
+    contract: result.contract,
+    decide: claude(using),
+    model: using.model,
+    root: location.path,
+    packageName: invocation.projectName,
+    ...(file === undefined ? { ask: keyboard } : {}),
+  });
+
+  const unverified = generated.outcomes.filter((one) => !one.verified);
+
+  say('');
+  if (generated.ending === 'returned') {
+    say(`interfacer: wrote ${String(generated.files.size)} files to ${generated.root}`);
+  } else {
+    // The partial flow is still written: a re-run reads the project like any
+    // other and continues from these steps rather than starting over.
+    say(`interfacer: discovery stopped (${generated.ending}); the partial flow is written.`);
+  }
+
+  for (const one of unverified) {
+    // Reported, never guessed: an arm whose detector was invented would exist
+    // in the contract while the condition it names arrived as a hard failure.
+    say(`  unverified outcome ${one.outcome.id}${one.why === undefined ? '' : ` — ${one.why}`}`);
+  }
+
+  if (generated.violation !== undefined) {
+    say(`  the flow does not satisfy its own declaration: ${generated.violation.expected}`);
+  }
+
+  say('');
+  // Interactively there is nothing to bound, so Interfacer reports instead. That
+  // number is what a person writes into an interview file to run one unattended.
+  say(
+    `  discovery cost $${generated.costUsd.toFixed(4)}; the interview cost $${result.costUsd.toFixed(4)}`,
+  );
+  return generated.ending === 'returned' ? 0 : 1;
 }
 
 process.exitCode = await main(process.argv.slice(2), process.env);

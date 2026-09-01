@@ -27,7 +27,7 @@ no model in the loop.
 | | what it is |
 | --- | --- |
 | `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, the execution engine, pause/resume, the evidence rules, and the effects a run refuses. The only runtime dependency a generated capability has. |
-| `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects; the CLI shell, the interview, the generator and the discovery loop are the parts that exist. |
+| `packages/interfacer` | `interfacer` — the CLI and agent: the interview that settles a contract, the discovery loop that finds the flow, and the generator that writes the project. |
 | `fixtures` | Five real HTTP applications served from the repo — `clean`, `legacy`, `hostile`, `rebranded`, `skewed` — differing in how hostile they are. Everything above the unit tier is proved against these rather than a public site. `npm run fixtures` starts them for a person to look at. |
 | `e2e` | The live-model tier. Tests only. |
 
@@ -37,12 +37,14 @@ an API key.
 
 ## status
 
-Phase 9 of the implementation plan. **A capability can be replayed, can stop to ask a
-human without losing its place, is bounded in what it may write down about what it
-saw, is refused where its own declaration says it needs a human it never asks, can be
-written out as a complete Node project that builds and runs with nothing added, can be
-discovered by a model driving the same engine that replays it — and is commissioned in
-a conversation that settles its contract before anything is driven.**
+Phase 10 of the implementation plan — the last of them, and complete apart from the
+live-model tier, which is a deliberate stop rather than an omission. **A capability can
+be commissioned in a
+conversation, discovered by a model driving the application, written out as a complete
+Node project that builds and runs with nothing added, and replayed from then on with no
+model in the loop — stopping to ask a human without losing its place, bounded in what it
+may write down about what it saw, and refused where its own declaration says it needs a
+human it never asks.**
 
 `@interfacer/dsl` carries the contract and the pure primitives — `Secret`,
 `fields()`/`Infer`, `Target`, the allowlist matcher, cost accounting, run-record entry
@@ -196,10 +198,51 @@ the entry point a new tenant changes. Anything the reader cannot parse is absent
 than guessed, so an edited project asks one question too many instead of carrying an
 answer nobody gave.
 
-Not built yet: generation mode (Phase 10), where the session switches from settling the
-contract to discovering the flow against the live application and writing the project
-out. A run is one session with a human in it, and the conversation does not end when the
-interview does.
+And it carries generation mode, which is the same session going on. When the contract is
+settled Interfacer switches to driving the model through the task against the live
+application, and the conversation does not stop: the model asks for the live values it
+needs as it needs them, naming the input each answer supplies, and they are held in
+memory and written nowhere — the flow refers to inputs by accessor, so the artifact is
+parameterized by construction. The point of no return is put to the person before it is
+activated, because an approval that arrived after the fact would be authorizing
+something already done.
+
+Then the outcomes. The interview declared what the task can end in besides success, and
+a detector for one is only findable by **reaching that state on purpose** — so Interfacer
+drives a pass of its own: it has the model ask for a value that provokes the outcome,
+re-runs the flow's own steps with it (performed, never appended — the flow is already
+built), and lets the model name the condition on the page that results. The tool refuses
+a detector that does not match what is in front of it. An outcome that cannot be reached
+is **reported unverified**, never guessed: an arm in the contract whose condition never
+matches arrives at replay as a hard failure, which is worse than not having it.
+
+Then the project. The session walks the finished flow once more so the model is looking
+at the screens rather than at a recollection of them, and proposes the two declarations
+only the application can settle — `vendor` and `appVersion` for the variant stamp, and a
+revision to `securityEffect` from what those screens gave up. Both are confirmed by the
+person, on the same terms as the allowlist; a field nobody knows is left absent, because
+a fabricated version reads as fact. A run that stops early — the stall guard, or a budget
+nobody was there to raise — still writes what it found, marked partial, because a re-run
+reads the project like any other and continues from those steps rather than starting
+over. Interactively, reaching the ceiling is an approval rather than a failure.
+
+And a rerun in a location that already holds a project starts from that project. Its
+flow is read back out of its own source — the reader is the printer's pair, and the
+round trip is asserted as one — and then **verified rather than trusted**: the steps are
+performed against this application, the ones that still resolve are kept, and the run
+picks up from the first that does not, which is retracted along with everything after
+it. The outcome detectors are deliberately not carried across, because wording is
+precisely what differs between tenants and a detector inherited unverified is the
+failure the whole mechanism exists to prevent: they are provoked again or they are not
+there. That is the difference between copying a project and editing the URL, which keeps
+a sibling's steps unchecked, and copying it and running Interfacer, which keeps only what
+still works. A call the reader cannot parse — a hand edit, most likely — stops the read
+there, so the cost is re-discovering the part that was edited rather than a flow that is
+quietly wrong.
+
+Not built yet: the live-model tier. Everything above is proved against real browsers and
+real applications with a scripted model, which is a deliberate stop before spending money
+on a live one.
 
 ## working on it
 

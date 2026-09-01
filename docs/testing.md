@@ -52,7 +52,15 @@ claims, which would otherwise be reported as covered by tests the gate never ran
   detection, budget exhaustion, and the between-turns allowlist check. It also holds
   the interview, conducted by a scripted `converse` against no browser at all: which
   answers a patch may settle, what a guardrail proposal costs, what is reported
-  missing, and what a rerun against a generated project still has to ask. It is also
+  missing, and what a rerun against a generated project still has to ask. And it holds
+  generation mode end to end — a scripted model drives the `clean` fixture, Interfacer
+  provokes the declared outcome, and the project lands in a temp directory, where the
+  assertions are about what the run produced: the detector recorded from the page that
+  produced it, the sentinel live values absent from every emitted file and every record
+  entry, the partial flow written when the run stops early, and the stamp naming a host
+  the run never visited. A second run in the same directory proves the seeded path:
+  the flow comes back off the disk, verifies against the application, and every outcome
+  is provoked again rather than inherited. It is also
   the only practical way to test pathological behaviour, because a live model will
   not produce it on demand — a provider that never finishes, or one that follows an
   instruction it read on a page. The scripted `decide` is a fake: it returns
@@ -71,7 +79,10 @@ claims, which would otherwise be reported as covered by tests the gate never ran
   resolves is visible at all.
 - **`e2e`** — real browser, real fixture, live model. The through-line: discovery
   reaches the goal, emits a project that compiles, and that project replays with
-  no model attached. Slow, non-deterministic, and it costs money.
+  no model attached. Slow, non-deterministic, and it costs money. **Deliberately
+  unwritten so far** — a scaffold test and nothing else. Everything the tiers above
+  prove, they prove against real browsers and real applications with a scripted model,
+  which is a stop chosen on purpose before spending money on a live one.
 
 ## the fixtures
 
@@ -394,12 +405,12 @@ settled:
   check reads the `headless` option and a caller supplying its own browser is
   taken at its word — which is what the `agent` tier does, since it is testing
   the loop rather than the window. What a live-model `e2e` run should use, and
-  how a person overrides it locally to watch one, is the part still open.
-  *(Phase 10)*
+  how a person overrides it locally to watch one, is the part still open, and stays
+  open while the live-model tier does. *(deferred with the `e2e` tier)*
 - **Run-record capture** — the record goes to stdout by default. Phase 3's
   redaction test asserts a secret sentinel appears nowhere in the record, in any
   attachment, or in any thrown error — scanning all output, not checking a field.
   That needs a capture policy. *(Phase 3)*
 - **Spend guard for `e2e`** — the tier currently skips when `API_KEY` is absent.
   Skipping is right for a scaffold and wrong for a release gate, which should say
-  it could not run rather than report green. *(Phase 10)*
+  it could not run rather than report green. *(deferred with the `e2e` tier)*
