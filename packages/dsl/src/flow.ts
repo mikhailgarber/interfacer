@@ -23,6 +23,7 @@
    `AnswerOf`. `eslint --fix` applied this rule once and silently collapsed every
    answer union to its success arm. `flow.test-d.ts` is what catches it. */
 import type { HostPattern } from './allowlist.js';
+import { checkAnswerSources } from './accessors.js';
 import { DEFAULT_EFFECTS, type Effects } from './effects.js';
 import type { FieldSet, Infer } from './fields.js';
 import {
@@ -570,6 +571,10 @@ export class Flow<
     map: Accessor<Infer<I>, P, O>,
     options: StepOptions = {},
   ): Flow<I, A | O, E, P> {
+    // An outcome fires on a page whose values were never extracted, so its map
+    // is handed the input. A map built to read extracted values would read the
+    // wrong object and quietly report `undefined` for every field.
+    checkAnswerSources(map, 'input', '.outcome()');
     this.#outcomes.push({
       id: this.stepId('outcome', detector, options),
       detector,
@@ -579,6 +584,7 @@ export class Flow<
   }
 
   returns<R>(map: (extracted: E) => R): Flow<I, A | R, E, P> {
+    checkAnswerSources(map, 'extracted', '.returns()');
     if (this.#result !== undefined) {
       throw new Error(`flow ${this.id} already declares a result`);
     }

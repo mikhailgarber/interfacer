@@ -19,6 +19,23 @@
 export { isSecret, makeSecret, REDACTED, type Secret } from './secret.js';
 
 export {
+  answer,
+  asMoney,
+  asNumber,
+  asText,
+  checkAnswerSources,
+  describes,
+  extracted,
+  field,
+  join,
+  literal,
+  obtained,
+  type Described,
+  type FillAccessor,
+  type ValueSource,
+} from './accessors.js';
+
+export {
   boolean,
   fieldNames,
   fields,
@@ -186,5 +203,13 @@ export {
 } from './safety.js';
 
 export { isDrift, resolveTarget, type Arity, type Resolution } from './resolve.js';
+
+export {
+  answerSchema,
+  answerShapes,
+  inputSchema,
+  type AnswerShape,
+  type JsonSchema,
+} from './schema.js';
 
 export { runFlow, type RunOptions } from './engine.js';

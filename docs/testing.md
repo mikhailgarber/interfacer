@@ -222,6 +222,24 @@ servers — the language server caches a failed module resolution and does not r
 on its own. A diagnostic that `npm run lint` does not reproduce is that cache, not the
 code.
 
+**The phase-7 integration test builds a real project, outside the source tree.**
+`packages/interfacer/test/generate.integration.test.ts` generates two capability
+projects into a `mkdtemp` directory under the system temp root, runs `npm install` and
+the project's own `tsc` in each, then imports the compiled master function, spawns the
+CLI as a child process and speaks JSON-RPC to the MCP server — all against the `clean`
+fixture. Asserting on the emitted *source* would prove only that the printer prints;
+the artifact is a program, so the test compiles it and calls it.
+
+Outside the source tree on purpose. A project that only builds where it was made is
+not portable, and one built inside this repo would resolve the DSL, Playwright and
+even TypeScript by walking up into the workspace — proving a portability it had
+quietly arranged. Everything comes from the project's own `node_modules`, installed
+from its own `package.json`, including the `tsc` that compiles it.
+
+The cost is that this one test does a real install: `typescript`, `@types/node` and
+Playwright, so it needs the network, and the first run pays for the download. It is
+also why nothing needs to be ignored — no generated file ever lands in the repo.
+
 **Fixture servers are started per test file, on ephemeral ports**, in a `beforeAll`
 and closed in an `afterAll`. Not a `globalSetup`: files run in parallel workers, and
 per-file servers on OS-assigned ports cannot collide on a port or share a session

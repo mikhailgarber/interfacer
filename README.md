@@ -27,7 +27,7 @@ no model in the loop.
 | | what it is |
 | --- | --- |
 | `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, the execution engine, pause/resume, the evidence rules, and the effects a run refuses. The only runtime dependency a generated capability has. |
-| `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects. |
+| `packages/interfacer` | `interfacer` — the CLI and agent: interview, agent loop, generation. It writes capability projects, and the generator is the part that exists. |
 | `fixtures` | Five real HTTP applications served from the repo — `clean`, `legacy`, `hostile`, `rebranded`, `skewed` — differing in how hostile they are. Everything above the unit tier is proved against these rather than a public site. `npm run fixtures` starts them for a person to look at. |
 | `e2e` | The live-model tier. Tests only. |
 
@@ -37,9 +37,11 @@ an API key.
 
 ## status
 
-Phase 6 of the implementation plan. **A capability can be replayed, can stop to ask a
+Phase 7 of the implementation plan. **A capability can be replayed, can stop to ask a
 human without losing its place, is bounded in what it may write down about what it
-saw, and is refused where its own declaration says it needs a human it never asks.**
+saw, is refused where its own declaration says it needs a human it never asks — and
+can be written out as a complete Node project that builds and runs with nothing
+added.**
 
 `@interfacer/dsl` carries the contract and the pure primitives — `Secret`,
 `fields()`/`Infer`, `Target`, the allowlist matcher, cost accounting, run-record entry
@@ -90,7 +92,48 @@ run that started and failed, since a refusal nobody can see in the record reads 
 run that never happened. `scope`, `external` and `financial` stay declared and
 published rather than enforced, each needing machinery nothing else here uses.
 
-Not built yet: the project generator (Phase 7) and the agent loop (Phase 8).
+`interfacer` carries the generator. Given a finished `Flow` and its contract it emits
+a project: `package.json` with a `bin`, a tsconfig, the `inputFields` / `effects`
+declarations, the flow itself as source, the master function and its overloads, a CLI
+entry point, a stdio MCP server, `variant.ts`, and a README written from the same
+declarations. Only the flow is genuinely synthesized; the two entry points are the
+same source in every project, because they read the declarations at run time rather
+than having a schema baked into them.
+
+The three surfaces are equal, and none wraps another. **The command line** prints the
+answer as JSON and exits 0 for a success and for a business outcome alike, sends a
+hard failure to stderr with the run id, refuses a `secret()` on argv and takes it from
+the environment, and answers its own pauses from the keyboard so the command stays one
+blocking call — its run record goes to stderr, because stdout carries the answer. **As
+a library** it is an ordinary typed function: `switch` on `result.status`,
+`isReplayError` in the catch, and supplying a resolver removes the `suspended` arm from
+the type. **As an MCP server** it speaks newline-delimited JSON-RPC over stdio with no
+dependency beyond the DSL, exposes one tool named for the capability, publishes the
+inputs without the credentials and the declared outcomes as the output schema, puts the
+effects in the tool description, and returns `suspended` as an ordinary result with a
+companion `resume` tool.
+
+The project carries the engine rather than naming it. `@interfacer/dsl` is not
+published to a registry, so a dependency on it would be a path back into an Interfacer
+checkout — a project that only works where it was made. Generation copies the **built**
+package into `vendor/interfacer-dsl/` and depends on that, so the project runs from
+wherever it is put; its own `npm install` pulls Playwright exactly as an install from a
+registry would have. The build rather than the source, because what a capability may do
+is bounded by what the DSL offers and that bound is structural — source compiled by the
+project would put the allowlist check and the redaction rules one edit away. The price
+is stated plainly: a fix in the DSL reaches an existing capability only by regenerating
+it.
+
+Emitting source is what the described accessors are for. `field('username')`,
+`obtained('mfaCode')`, `extracted('balance')`, `literal(…)`, `join(…)` and
+`answer(status, values)` are the same functions the engine calls, carrying what they
+read — a closure runs identically and cannot be printed back into source, so the
+generator refuses one by name rather than emitting something that looks right. A
+`read` capability containing a `.commit()` is refused here too, once, rather than at
+every run.
+
+Not built yet: the agent loop (Phase 8), the interview (Phase 9) and generation mode
+(Phase 10).
 
 ## working on it
 
