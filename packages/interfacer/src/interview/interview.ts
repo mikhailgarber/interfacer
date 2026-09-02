@@ -260,11 +260,7 @@ export async function interview(options: InterviewOptions): Promise<InterviewRes
               (field) => !applied.refused.some((why) => why.startsWith(field)),
             );
             if (settledNow.length > 0) {
-              write({
-                kind: 'answer.recorded',
-                fields: settledNow,
-                authority: recording.by === 'file' ? 'file' : 'human',
-              });
+              write({ kind: 'answer.recorded', fields: settledNow, authority: recording.by });
             }
             say(
               applied.refused.length === 0,

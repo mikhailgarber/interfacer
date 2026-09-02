@@ -103,10 +103,12 @@ function matchesPattern(host: string, pattern: HostPattern): boolean {
  * legitimate page load from one an injection asked for.
  */
 export function checkAllowlist(url: string, allowlist: readonly HostPattern[]): AllowlistDecision {
-  for (const pattern of allowlist) {
-    assertUsablePattern(pattern);
-  }
-
+  // The patterns are *not* validated here. They are fixed for a whole run, so
+  // re-checking them per request is redundant work — and this function is called
+  // from a Playwright request handler, where a throw is unhandled and takes the
+  // process down with no record at all. A malformed pattern is a defect in the
+  // artifact, exactly as the comment on `assertUsablePattern` says, so it is
+  // caught when the artifact is taken up: see `openExecution`.
   let parsed: URL;
   try {
     parsed = new URL(url);

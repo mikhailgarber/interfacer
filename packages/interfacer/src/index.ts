@@ -111,6 +111,7 @@ export { fieldsFor, flowFor, liveValues } from './generation/flow.js';
 export { rerunFlow, type Rerun } from './generation/rerun.js';
 
 export { provokeOutcomes, type Provocations, type Provoked } from './generation/provoke.js';
+export { deadNavigations } from './generation/generation.js';
 
 export { inspect, type InspectOptions, type Proposals } from './generation/inspect.js';
 

@@ -24,6 +24,7 @@ import {
   extracted,
   field,
   incidentalSelector,
+  isBestFirst,
   join,
   literal,
   makeSecret,
@@ -263,6 +264,41 @@ export function bindValue(field: Field, answer: string): unknown {
 
 export const TOOL_NAMES: ReadonlySet<string> = new Set(TOOLS.map((tool) => tool.name));
 
+/**
+ * An address `open` may be given: one the contract declares, and nothing else.
+ *
+ * Navigation is an action, not an address. A URL assembled from literals is not
+ * a shortcut but a different capability — it encodes a scheme no contract
+ * agreed to, it skips the states the task passes through, and an outcome
+ * defined by one of those states becomes undetectable by construction rather
+ * than merely unfound. A live run recorded `open("…/company/" + companyName)`
+ * after opening the search results and abandoning them, which is exactly that:
+ * right for the one company whose slug matched its name, and fatal to the
+ * outcome that was defined as "the first result is not a company".
+ *
+ * Discovery only. The DSL is unchanged, so a hand-written flow may open
+ * whatever it likes; the cost here is a corrective turn.
+ */
+function declaredAddress(spec: unknown): AnyAccessor {
+  const literalIn = (value: unknown): boolean => {
+    const source = value as ValueSpec | undefined;
+    if (source?.from === 'literal') {
+      return true;
+    }
+    return source?.from === 'join' && (source.parts ?? []).some(literalIn);
+  };
+
+  if (literalIn(spec)) {
+    throw new ToolArgumentError(
+      'open addresses only what the contract declares. Navigate by acting on the page — the ' +
+        'control that leads there — or, if the run genuinely needs this address, ask for it as ' +
+        'an input and open that.',
+    );
+  }
+
+  return accessorFor(spec);
+}
+
 /** A value source as the model states it, turned into a described accessor. */
 interface ValueSpec {
   readonly from: string;
@@ -353,7 +389,22 @@ function chain(raw: unknown): TargetChain {
     }
   }
 
-  return raw as unknown as TargetChain;
+  const ordered = raw as unknown as TargetChain;
+
+  // Ordering is load-bearing, not advisory: an ambiguous or absent primary
+  // falls through to a weaker strategy, and "a weaker strategy carried it"
+  // only reads as drift if the stronger one was genuinely tried first. A chain
+  // recorded out of order reports drift that did not happen and hides drift
+  // that did.
+  if (!isBestFirst(ordered)) {
+    throw new ToolArgumentError(
+      'a chain is recorded best-first: a role and its accessible name, then a label, then ' +
+        'visible text, then CSS. Put the strategy that should survive a release first, backed ' +
+        'by the selector you observed to work.',
+    );
+  }
+
+  return ordered;
 }
 
 function text(input: Readonly<Record<string, unknown>>, key: string): string {
@@ -380,7 +431,7 @@ export function appendStep(
 
   switch (call.name) {
     case 'open':
-      flow.open(accessorFor(input.url));
+      flow.open(declaredAddress(input.url));
       break;
     case 'fillForm':
       flow.fillForm(chain(input.target), accessorFor(input.value));

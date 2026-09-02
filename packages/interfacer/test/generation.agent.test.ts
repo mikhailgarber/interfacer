@@ -816,3 +816,46 @@ describe('a phase that throws after discovery has succeeded', () => {
     expect(written).toContain('.extract(');
   }, 60_000);
 });
+
+describe('what a provocation spends', () => {
+  it('is on the record, turn by turn, like every other model call', async () => {
+    // Provocation and inspection drove the model and wrote nothing: a live run
+    // showed four runs at zero turns against $0.98 of discovery spend. It also
+    // made a report unreadable — "no provoking value was obtained" could mean
+    // the model asked and the answer did not bind, or that it never asked, and
+    // the record could not say which.
+    const root = scratch();
+    const entries: Entry[] = [];
+    const { ask } = person({
+      'where does this start': bundle.fixtures.clean.url,
+      'sign in as': LIVE.username,
+      password: LIVE.password,
+      'which account': LIVE.accountRef,
+      'not exist': 'ACC-9999',
+    });
+
+    await generate({
+      ...QUIET,
+      contract: contract(bundle.fixtures.clean.url),
+      decide: script(...reachTheGoal(), ...provokeAndInspect()),
+      ask,
+      browser,
+      root,
+      packageName: 'mybank-balance',
+      record: (entry) => entries.push(entry),
+    });
+
+    // Group the turns by the run that spent them: the discovery run is not the
+    // only one that costs money.
+    const spending = new Map<string, number>();
+    for (const entry of entries) {
+      if (entry.kind === 'model.turn') {
+        spending.set(entry.runId, (spending.get(entry.runId) ?? 0) + 1);
+      }
+    }
+
+    // More than one run drove the model, and every one of them says so.
+    expect(spending.size).toBeGreaterThan(1);
+    expect([...spending.values()].every((turns) => turns > 0)).toBe(true);
+  }, 60_000);
+});

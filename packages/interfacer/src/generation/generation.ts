@@ -25,6 +25,7 @@ import {
   type SafetyViolation,
   type SecurityEffect,
   type Spend,
+  type Step,
   type VariantStamp,
   addUsage,
   ratesFor,
@@ -73,8 +74,38 @@ export interface Generation {
   readonly costUsd: number;
   /** A flow that cannot satisfy its own declaration, where it does not. */
   readonly violation?: SafetyViolation;
+  /**
+   * Navigations whose page nothing used, by step id. Empty where there are none.
+   *
+   * Reported with the run rather than removed from the flow: what was recorded
+   * is what happened, and this says only that it was more than the task needed.
+   */
+  readonly wasted: readonly string[];
   /** What was read from a project already in the location, where one was. */
   readonly seed?: Seed;
+}
+
+/**
+ * Navigations whose page nothing ever used, by step id.
+ *
+ * An `open` immediately followed by another is waste every replay pays for, and
+ * it reads to a later reviewer as though it mattered. A live run against a real
+ * site opened a page of search results and navigated away without touching
+ * them — so the state a declared outcome was defined against ("the first result
+ * is not a company") was never on screen to be detected at all.
+ *
+ * Reported rather than removed. The artifact is what happened, and a step
+ * deleted after the fact would make it something else — the same reason an
+ * outcome that could not be provoked is reported rather than guessed.
+ *
+ * A property of the finished flow, so it holds whatever the model does, which
+ * is what distinguishes it from every other guard against recording the wrong
+ * thing.
+ */
+export function deadNavigations(steps: readonly Step[]): readonly string[] {
+  return steps.flatMap((step, index) =>
+    step.kind === 'open' && steps[index + 1]?.kind === 'open' ? [step.id] : [],
+  );
 }
 
 /** The host discovery actually ran against, for the stamp. */
@@ -261,6 +292,7 @@ export async function generate(options: GenerationOptions): Promise<Generation> 
       files,
       root: options.root,
       ...(seed === undefined ? {} : { seed }),
+      wasted: deadNavigations(flow.steps),
       spend,
       costUsd: rates === undefined ? 0 : spendCost(spend, rates),
       ...(violation === undefined ? {} : { violation }),

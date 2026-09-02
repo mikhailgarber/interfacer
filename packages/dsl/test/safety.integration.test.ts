@@ -15,8 +15,10 @@ import {
 
 import {
   approvedTransferFlow,
+  balanceFlow,
   transferFlow,
   twoTransfersFlow,
+  type BalanceInput,
   type TransferInput,
 } from './flows.js';
 
@@ -40,6 +42,15 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all([bundle.closeAll(), browser.close()]);
 });
+
+function balanceInput(): BalanceInput {
+  return {
+    url: bundle.fixtures.clean.url,
+    username: 'teller1',
+    password: makeSecret('s3cret-teller'),
+    accountRef: 'ACC-1001',
+  };
+}
 
 function transferInput(): TransferInput {
   return {
@@ -186,5 +197,49 @@ describe('a capability that changes who can access the account', () => {
 
     expect(failure).toBeInstanceOf(EffectsRefused);
     expect(isReplayError(failure) && failure.step).toBe('transfer.commit');
+  });
+});
+
+describe('a capability whose allowlist could never admit anything', () => {
+  it('is refused before a browser opens, rather than crashing a request handler', async () => {
+    // The pattern is matched against `URL.hostname`, which carries no port, so
+    // `127.0.0.1:4001` admits nothing while reading as though it names a host.
+    // It used to be validated inside `checkAllowlist`, which runs from a
+    // Playwright `page.on("request")` handler — so the throw was unhandled and
+    // took the process down with a stack trace and no record at all.
+    const captured = capture();
+
+    const failure = await runFlow(balanceFlow({ allowlist: ['127.0.0.1:4001'] }), balanceInput(), {
+      ...RUN,
+      browser,
+      record: captured.record,
+    }).catch((error: unknown) => error);
+
+    expect(isReplayError(failure)).toBe(true);
+    expect(isReplayError(failure) && failure.observed).toContain('127.0.0.1:4001');
+
+    // A started run that failed, with nothing driven — the same shape every
+    // other refusal from the artifact takes.
+    expect(captured.entries.map((entry) => entry.kind)).toEqual([
+      'run.started',
+      'error',
+      'run.finished',
+    ]);
+    expect(captured.entries.some((entry) => entry.kind === 'navigation')).toBe(false);
+  });
+
+  it('refuses a wildcard that was always capable of taking the process down', async () => {
+    // The same hazard, latent since the rule was written: a bare `*` reached the
+    // identical throw. Nobody hit it because no model proposes one.
+    const captured = capture();
+
+    const failure = await runFlow(balanceFlow({ allowlist: ['*'] }), balanceInput(), {
+      ...RUN,
+      browser,
+      record: captured.record,
+    }).catch((error: unknown) => error);
+
+    expect(isReplayError(failure)).toBe(true);
+    expect(captured.entries.some((entry) => entry.kind === 'run.finished')).toBe(true);
   });
 });

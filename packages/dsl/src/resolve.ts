@@ -100,6 +100,13 @@ async function sweep(
   chain: TargetChain,
   arity: Arity,
 ): Promise<Resolution | undefined> {
+  // An ambiguous strategy is remembered rather than returned: "never take the
+  // first" is a rule about the *matches*, not about the chain. Choosing between
+  // two elements is a guess; falling through to a strategy that identifies one
+  // of them is the fallback doing its job. Reported only if nothing else in the
+  // chain resolves uniquely, so the reason a step failed is still the real one.
+  let ambiguous: Resolution | undefined;
+
   for (const [index, target] of chain.entries()) {
     const locator = locatorFor(page, target);
     const matches = await locator.count();
@@ -109,7 +116,8 @@ async function sweep(
     }
 
     if (matches > 1 && arity === 'unique') {
-      return { found: false, reason: 'ambiguous', strategy: target.by, index, matches };
+      ambiguous ??= { found: false, reason: 'ambiguous', strategy: target.by, index, matches };
+      continue;
     }
 
     return {
@@ -121,7 +129,7 @@ async function sweep(
     };
   }
 
-  return undefined;
+  return ambiguous;
 }
 
 export async function resolveTarget(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkAllowlist } from '@interfacer/dsl';
+import { assertUsablePattern, checkAllowlist } from '@interfacer/dsl';
 
 /**
  * The allowlist is a guardrail on a non-deterministic model during discovery and
@@ -123,12 +123,30 @@ describe('checkAllowlist', () => {
     ])('throws on %s', (_name, pattern) => {
       // A malformed pattern is a defect in the artifact, not a condition met at
       // run time — so it fails loudly rather than quietly denying (or worse,
-      // quietly admitting) every navigation.
-      expect(() => checkAllowlist('https://mybank.com/', [pattern])).toThrow(TypeError);
+      // quietly admitting) every navigation. Asserted against the validator
+      // itself: `checkAllowlist` deliberately no longer calls it, because it
+      // runs from a request handler where a throw is unhandled.
+      expect(() => {
+        assertUsablePattern(pattern);
+      }).toThrow(TypeError);
     });
 
-    it('throws even when an earlier pattern would have admitted the URL', () => {
-      expect(() => checkAllowlist('https://mybank.com/', ['mybank.com', '*'])).toThrow(TypeError);
+    it('throws even where the pattern sits beside a usable one', () => {
+      expect(() => {
+        for (const pattern of ['mybank.com', '*']) {
+          assertUsablePattern(pattern);
+        }
+      }).toThrow(TypeError);
+    });
+
+    it('is not what `checkAllowlist` does, because it runs where a throw is fatal', () => {
+      // The regression this guards: validating per request put the throw inside
+      // `page.on("request")`, so a routine pattern took the whole process down
+      // with no record at all. The decision function has to stay total — a
+      // pattern that admits nothing denies, and the artifact check is what says
+      // the pattern was the problem.
+      expect(() => checkAllowlist('https://mybank.com/', ['mybank.com:443'])).not.toThrow();
+      expect(checkAllowlist('https://mybank.com/', ['mybank.com:443']).allowed).toBe(false);
     });
   });
 });

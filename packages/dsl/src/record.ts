@@ -160,8 +160,16 @@ export type EntryBody =
   | {
       readonly kind: 'answer.recorded';
       readonly fields: readonly string[];
-      /** A person in the session, or a sentence quoted from the interview file. */
-      readonly authority: 'human' | 'file';
+      /**
+       * What admitted the answer, in its own terms rather than flattened.
+       *
+       * `model` is the ordinary interactive case — the model reporting what it
+       * was told — and it is *not* the same as `human`, which is a person
+       * confirming a proposal put to them just now. Collapsing the two would
+       * erase the distinction the design turns on, and would read as though a
+       * person had stated something they were never asked.
+       */
+      readonly authority: 'human' | 'file' | 'project' | 'model';
     }
   /**
    * A guardrail Interfacer proposed, and whether it was accepted.

@@ -144,6 +144,7 @@ export {
 export {
   ApprovalDenied,
   CheckpointFailed,
+  AllowlistUnusable,
   EffectsRefused,
   InputMissing,
   InteractionFailed,

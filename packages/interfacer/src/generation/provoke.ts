@@ -141,6 +141,31 @@ async function provokeOne(
       PROVOKE_TOOLS,
     );
     spend = addUsage(spend, turn.usage);
+    // Provocation drives the model too, and a run that spends without saying so
+    // leaves its own report unreadable: "no provoking value was obtained" reads
+    // the same whether the model asked and the answer did not bind, or whether
+    // it never asked at all.
+    if (turn.calls.length === 0) {
+      execution.record({
+        kind: 'model.turn',
+        reason:
+          turn.refusal === undefined
+            ? (turn.responseShape ?? 'the turn called no tool')
+            : `refused (${turn.refusal.category})`,
+        tool: 'none',
+        usage: turn.usage,
+        costUsd: 0,
+      });
+    }
+    for (const call of turn.calls) {
+      execution.record({
+        kind: 'model.turn',
+        reason: turn.text,
+        tool: call.name,
+        usage: turn.usage,
+        costUsd: 0,
+      });
+    }
     transcript.push({ kind: 'called', text: turn.text, calls: turn.calls });
     return turn.calls;
   };

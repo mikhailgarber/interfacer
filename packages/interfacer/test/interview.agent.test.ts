@@ -486,4 +486,80 @@ describe('what the interview writes into the run record', () => {
     expect(written).not.toContain('may visit mybank.invalid');
     expect(written).not.toContain(ORDINARY.task);
   });
+
+  it('does not call the model reporting an answer the same thing as a person confirming one', async () => {
+    // Interactively the model records what it was told; a person only ever
+    // *confirms a proposal*. Flattening the two would read as though somebody
+    // stated something they were never asked — which is exactly what happened
+    // on a live run, where `dataClasses` was recorded without the question
+    // being put at all.
+    const entries: Entry[] = [];
+    const { converse } = script(
+      turn(
+        { name: 'record', input: ORDINARY },
+        { name: 'propose', input: { field: 'allowlist', value: ['mybank.invalid'] } },
+        {
+          name: 'propose',
+          input: { field: 'securityEffect', value: 'none', why: 'it only reads' },
+        },
+      ),
+      turn({ name: 'settled', input: {} }),
+    );
+
+    await interview({
+      converse,
+      ask: () => Promise.resolve('yes'),
+      capabilityId: 'checkAccountBalance',
+      record: (entry) => entries.push(entry),
+    });
+
+    // Recorded by the model, on the person's say-so but unverified.
+    const recorded = entries.filter((entry) => entry.kind === 'answer.recorded');
+    expect(recorded.length).toBeGreaterThan(0);
+    expect(recorded.every((entry) => entry.authority === 'model')).toBe(true);
+
+    // Confirmed by the person, which is a different thing and stays distinct.
+    const put = entries.filter((entry) => entry.kind === 'proposal.put');
+    expect(put.map((entry) => entry.field).sort()).toEqual(['allowlist', 'securityEffect']);
+    expect(put.every((entry) => entry.accepted)).toBe(true);
+  });
+});
+
+describe('an allowlist pattern that could never admit anything', () => {
+  it('is refused when proposed, which is the route the allowlist actually takes', async () => {
+    // The allowlist is `GUARDED`, so it is always *proposed* and never
+    // *recorded* — and the first version of this guard validated only the
+    // recording route. A live run then proposed `127.0.0.1:4001`, nothing
+    // objected, the person confirmed it, and the pattern reached the contract.
+    const asked: string[] = [];
+    const { converse } = script(
+      turn(
+        { name: 'record', input: ORDINARY },
+        { name: 'propose', input: { field: 'allowlist', value: ['127.0.0.1:4001'] } },
+      ),
+      turn(
+        { name: 'propose', input: { field: 'allowlist', value: ['127.0.0.1'] } },
+        {
+          name: 'propose',
+          input: { field: 'securityEffect', value: 'none', why: 'it only reads' },
+        },
+      ),
+      turn({ name: 'settled', input: {} }),
+    );
+
+    const result = await interview({
+      converse,
+      ask: (question) => {
+        asked.push(question.text);
+        return Promise.resolve('yes');
+      },
+    });
+
+    // The usable one settled; the inert one never entered the contract.
+    expect(result.contract?.allowlist).toEqual(['127.0.0.1']);
+
+    // And the person was never asked to confirm the unusable one — a guardrail
+    // waved through is exactly what a confirmation is supposed to prevent.
+    expect(asked.some((question) => question.includes('127.0.0.1:4001'))).toBe(false);
+  });
 });

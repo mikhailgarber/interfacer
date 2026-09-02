@@ -22,11 +22,13 @@ import { chromium, type Browser, type Page, type Request, type Route } from 'pla
 
 import { describes } from './accessors.js';
 import { checkAllowlist, type HostPattern } from './allowlist.js';
+import { assertUsablePattern } from './allowlist.js';
 import { capture, type AttachmentTrigger } from './attachments.js';
 import { evidencePolicyFor, redactUrl, STRUCTURAL_ATTRIBUTES, VALUE_BEARING } from './effects.js';
 import {
   ApprovalDenied,
   CheckpointFailed,
+  AllowlistUnusable,
   EffectsRefused,
   InputMissing,
   InteractionFailed,
@@ -420,6 +422,41 @@ export async function openExecution<I extends FieldSet, A>(
     effectsDeclared: flow.effectsDeclared,
   });
 
+  // Origins the caller is entitled to reach. Built here, before the browser and
+  // before the safety check, because it is part of what the artifact declares
+  // and is checked on the same terms.
+  const allowed = new Set<HostPattern>(options.allowlist ?? flow.declaredAllowlist);
+
+  // A pattern is matched against `URL.hostname`, which carries no port, scheme
+  // or path — so one that has any of them admits nothing while reading as
+  // though it names a host. Checked once, here, rather than on every request:
+  // the set is fixed for the run, and `checkAllowlist` is called from a request
+  // handler where a throw would be unhandled and would take the process down
+  // with no record at all.
+  for (const pattern of allowed) {
+    try {
+      assertUsablePattern(pattern);
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      record(
+        {
+          kind: 'error',
+          category: 'hard-failure',
+          expected: 'an allowlist of host patterns',
+          observed: why,
+        },
+        flow.id,
+      );
+      record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
+      throw new AllowlistUnusable(`${flow.id}: ${why}`, {
+        runId,
+        step: flow.id,
+        expected: 'an allowlist of host patterns',
+        observed: why,
+      });
+    }
+  }
+
   // Before a browser opens. A flow that provably cannot satisfy its own
   // declaration — an irreversible commit no approval precedes, a
   // `securityEffect` capability asked to run with nobody watching — is refused
@@ -450,11 +487,9 @@ export async function openExecution<I extends FieldSet, A>(
   browser ??= await chromium.launch({ headless: options.headless ?? true });
   const openBrowser = browser;
 
-  // Origins the caller is entitled to reach. The entry point's own origin is
-  // added when `.open()` resolves it: the caller chose where to point the
-  // capability, so the allowlist is not there to second-guess that — it bounds
-  // everywhere *else* the automation could be taken.
-  const allowed = new Set<HostPattern>(options.allowlist ?? flow.declaredAllowlist);
+  // The entry point's own origin is added when `.open()` resolves it: the caller
+  // chose where to point the capability, so the allowlist is not there to
+  // second-guess that — it bounds everywhere *else* the automation could be taken.
 
   let blocked: { url: string; reason: string } | undefined;
   /**

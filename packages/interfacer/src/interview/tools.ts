@@ -342,19 +342,11 @@ export function patchOf(call: ToolCall): AnswerPatch {
     patch.effects = effectsOf(input.effects);
   }
   if (input.allowlist !== undefined) {
-    const hosts = stringList(input.allowlist, 'allowlist');
     // Refused where it is authored rather than at the first navigation it fails
     // to admit: a pattern carrying a port, a scheme or a path matches nothing,
     // and a contract naming a host it cannot actually reach is worse than one
     // that names none.
-    for (const host of hosts) {
-      try {
-        assertUsablePattern(host);
-      } catch (error) {
-        throw new ToolArgumentError(error instanceof Error ? error.message : String(error));
-      }
-    }
-    patch.allowlist = hosts;
+    patch.allowlist = usableHosts(stringList(input.allowlist, 'allowlist'));
   }
   if (input.budgetUsd !== undefined) {
     if (typeof input.budgetUsd !== 'number' || !Number.isFinite(input.budgetUsd)) {
@@ -367,6 +359,27 @@ export function patchOf(call: ToolCall): AnswerPatch {
 }
 
 /** A `propose` call, as a proposal to put to a person. */
+/**
+ * Host patterns, refused where they could never admit anything.
+ *
+ * Called from both authoring routes rather than from one shared place further
+ * down, because the *ask* sits between them and `applyAnswers`: validating
+ * after the question is put would still have a person confirming a pattern that
+ * admits nothing, and a guardrail waved through is exactly what a confirmation
+ * exists to prevent. The allowlist is `GUARDED`, so `propose` is the route it
+ * actually takes — a guard on `record` alone protects the unused door.
+ */
+function usableHosts(hosts: readonly string[]): readonly string[] {
+  for (const host of hosts) {
+    try {
+      assertUsablePattern(host);
+    } catch (error) {
+      throw new ToolArgumentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return hosts;
+}
+
 export function proposalOf(call: ToolCall): Proposal {
   const field = call.input.field;
   if (field !== 'allowlist' && field !== 'securityEffect') {
@@ -382,6 +395,10 @@ export function proposalOf(call: ToolCall): Proposal {
         : undefined;
   if (stated === undefined || stated.length === 0) {
     throw new ToolArgumentError('a proposal needs a value');
+  }
+
+  if (field === 'allowlist') {
+    usableHosts(Array.isArray(stated) ? stated : [stated]);
   }
 
   const why = call.input.why;

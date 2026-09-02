@@ -810,10 +810,14 @@ describe('a run that stops changing the page', () => {
 describe('a provider that never finishes', () => {
   it('is terminated by the turn bound, which costs nothing to reach', async () => {
     const flow = capability();
-    // Genuinely novel every turn: each call navigates somewhere slightly
-    // different, so the page keeps changing and a step keeps being appended —
-    // the stall guard never fires. Reporting no usage means the budget never
-    // fires either. Something still has to end the run.
+    // A step is appended every turn, so the stall guard never fires — appending
+    // is what resets it. Reporting no usage means the budget never fires
+    // either. Something still has to end the run.
+    //
+    // It checkpoints rather than navigating: `open` now takes only an address
+    // the contract declares, so a model cannot spin by inventing a new URL per
+    // turn — which is the point of that rule, and leaves the turn bound as the
+    // thing under test here.
     let n = 0;
     const decide: Decide = () => {
       n += 1;
@@ -821,19 +825,17 @@ describe('a provider that never finishes', () => {
         text: '',
         usage: { inputTokens: 0, outputTokens: 0 },
         calls: [
-          {
-            id: `loop_${String(n)}`,
-            name: 'open',
-            input: {
-              url: {
-                from: 'join',
-                parts: [
-                  { from: 'input', name: 'url' },
-                  { from: 'literal', value: `/?n=${String(n)}` },
-                ],
+          n === 1
+            ? {
+                id: 'loop_open',
+                name: 'open',
+                input: { url: { from: 'input', name: 'url' } },
+              }
+            : {
+                id: `loop_${String(n)}`,
+                name: 'checkpoint',
+                input: { target: [{ by: 'label', text: 'Username' }] },
               },
-            },
-          },
         ],
       });
     };
@@ -1136,5 +1138,111 @@ describe('the terminal entry a run writes', () => {
     expect(entries.filter((entry) => entry.kind === 'run.finished')).toHaveLength(1);
     // And the failure itself is still on the record, as an error.
     expect(entries.some((entry) => entry.kind === 'error')).toBe(true);
+  });
+});
+
+// @covers agent.open-addresses-declared-input
+describe('an address the contract never declared', () => {
+  it('is refused, and the model is told to act on the page or ask for an input', async () => {
+    // A live run against a real site recorded `open(literal("…/login"))` and
+    // then `open(join(literal("…/company/"), field("companyName"), "/about/"))`,
+    // abandoning the search results it had just opened. It worked for the one
+    // company whose slug matched its name, and it made the declared outcome —
+    // "the first result is not a company" — undetectable by construction,
+    // because no first result was ever inspected.
+    const flow = capability();
+    const { decide, seen } = script(
+      // Both addresses are inside the allowlist and would load: what is under
+      // test is the refusal, not the navigation guard.
+      turn({
+        name: 'open',
+        input: { url: { from: 'literal', value: `${bundle.fixtures.clean.url}/login` } },
+      }),
+      turn({
+        name: 'open',
+        input: {
+          url: {
+            from: 'join',
+            parts: [
+              { from: 'literal', value: `${bundle.fixtures.clean.url}/accounts/` },
+              { from: 'input', name: 'accountRef' },
+            ],
+          },
+        },
+      }),
+      turn({ name: 'open', input: { url: { from: 'input', name: 'url' } } }),
+    );
+
+    const discovered = await discover(flow, {
+      ...QUIET,
+      task: 'read the balance of an account',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 4,
+    });
+
+    // Neither constructed address is in the artifact; the declared one is.
+    expect(discovered.flow.steps.map((step) => step.kind)).toEqual(['open']);
+
+    // And the refusal said what to do instead, rather than only saying no.
+    const results = seen
+      .at(-1)
+      ?.transcript.flatMap((one) => (one.kind === 'results' ? one.results : []));
+    const refusals = (results ?? []).filter((one) => !one.ok);
+    expect(refusals).toHaveLength(2);
+    expect(refusals[0]?.detail).toMatch(/act on the page|ask for it as an input/i);
+  });
+});
+
+// @covers target.chain-order-enforced
+describe('a chain recorded out of order', () => {
+  it('is refused, because a fallback winning only means drift if the stronger one went first', async () => {
+    // `isBestFirst` existed, was exported and unit-tested, and was called from
+    // nowhere — so a live run recorded `[css("div[data-testid=…]"), byRole(…)]`
+    // and nothing objected. Now that an ambiguous primary falls through to a
+    // weaker strategy, an unordered chain would report drift that did not
+    // happen and hide drift that did.
+    const flow = capability();
+    const { decide, seen } = script(
+      turn({ name: 'open', input: { url: { from: 'input', name: 'url' } } }),
+      turn({
+        name: 'checkpoint',
+        input: {
+          target: [
+            { by: 'css', selector: '#username' },
+            { by: 'label', text: 'Username' },
+          ],
+        },
+      }),
+      turn({
+        name: 'checkpoint',
+        input: {
+          target: [
+            { by: 'label', text: 'Username' },
+            { by: 'css', selector: '#username' },
+          ],
+        },
+      }),
+    );
+
+    const discovered = await discover(flow, {
+      ...QUIET,
+      task: 'read the balance of an account',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 4,
+    });
+
+    // The ordered one is kept; the inverted one never entered the artifact.
+    expect(discovered.flow.steps.map((step) => step.kind)).toEqual(['open', 'checkpoint']);
+
+    const results = seen
+      .at(-1)
+      ?.transcript.flatMap((one) => (one.kind === 'results' ? one.results : []));
+    const refused = (results ?? []).filter((one) => !one.ok);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.detail).toMatch(/best-first|order/i);
   });
 });

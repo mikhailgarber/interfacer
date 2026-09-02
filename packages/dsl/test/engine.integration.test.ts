@@ -285,6 +285,34 @@ describe('targeting', () => {
     );
   });
 
+  it('falls through an ambiguous primary to a strategy that resolves uniquely', async () => {
+    // `hostile` labels two fields "ID", and `#s_1` answers to exactly one of
+    // them. The chain exists for precisely this: stopping at the ambiguous
+    // primary spends its whole value at the moment it was meant to pay. A live
+    // run against a real site died on a label matching twice with an id sitting
+    // untried behind it.
+    const captured = capture();
+    const flow = hostileLogin(new Flow({ id: 'ambiguous', input: balanceInput }))
+      .fillForm([byLabel('ID'), css('#s_1')], (i) => i.accountRef, { id: 'search.ref' })
+      .returns(() => ({ status: 'ok' as const }));
+
+    const answer = await runFlow(flow, input('hostile'), {
+      ...RUN,
+      browser,
+      record: captured.record,
+    });
+
+    expect(answer).toEqual({ status: 'ok' });
+
+    // And it is drift, not a clean pass: the strategy that should have survived
+    // the release did not, and the record says which one carried it.
+    const step = captured.entries.find(
+      (entry) => entry.kind === 'step.finished' && entry.stepId === 'search.ref',
+    );
+    expect(step?.kind === 'step.finished' ? step.resolvedBy : undefined).toBe('css');
+    expect(step?.kind === 'step.finished' ? step.drifted : undefined).toBe(true);
+  });
+
   it('names the step and both sides of an ambiguous match', async () => {
     const flow = hostileLogin(new Flow({ id: 'ambiguous', input: balanceInput }))
       .fillForm([byLabel('ID')], (i) => i.accountRef, { id: 'search.ambiguous' })

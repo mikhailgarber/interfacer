@@ -102,6 +102,16 @@ export class ApprovalDenied extends ReplayError {}
 export class EffectsRefused extends ReplayError {}
 
 /**
+ * The declared allowlist contains a pattern that could never admit anything.
+ *
+ * Its own class rather than `EffectsRefused`, because a reader tracing an
+ * allowlist defect should not be sent looking at the effects declaration. Like
+ * every refusal knowable from the artifact alone, it is raised before a browser
+ * opens and recorded as a started run that failed.
+ */
+export class AllowlistUnusable extends ReplayError {}
+
+/**
  * A resolver answered with something the kind it was asked did not admit.
  *
  * One `Resolver` serves every kind, so the response type cannot be tied to the

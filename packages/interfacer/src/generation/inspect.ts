@@ -106,6 +106,16 @@ export async function inspect(
     );
 
     spend = addUsage(spend, turn.usage);
+    // The inspection pass spends on the model as well, and said nothing.
+    for (const call of turn.calls.length === 0 ? [undefined] : turn.calls) {
+      execution.record({
+        kind: 'model.turn',
+        reason: turn.text,
+        tool: call?.name ?? 'none',
+        usage: turn.usage,
+        costUsd: 0,
+      });
+    }
 
     let vendor: string | undefined;
     let appVersion: string | undefined;

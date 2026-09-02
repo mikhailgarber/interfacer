@@ -82,7 +82,15 @@ exists.
   only if the application accepted it, so the flow cannot drift from what happened.
 - **It sees the accessibility tree** — the vocabulary its targets are written in — plus
   what identifies the page's value-bearing elements. Targets that count to an element or
-  lean on a generated class name are refused when proposed.
+  lean on a generated class name are refused when proposed, as is a chain recorded out
+  of order — at replay a primary that misses falls through to the next strategy, and
+  "a weaker one carried it" only reads as drift if the stronger one went first.
+- **It navigates by acting, not by addressing.** `open` takes only an address the
+  contract declares; a URL assembled from literals is refused, because it encodes a
+  scheme no contract agreed to and skips the states the task passes through — which can
+  leave a declared outcome undetectable by construction. Where the task describes a
+  route, that route is the specification. A navigation whose page nothing then uses is
+  reported with the run: it is waste every replay pays for.
 - **Live values are asked for, never stored.** They are held in memory for the run and
   written nowhere; the flow refers to inputs by accessor. A credential is not echoed to
   the screen and never reaches the model.

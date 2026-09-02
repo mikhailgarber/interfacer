@@ -25,6 +25,7 @@ import {
   type Duration,
   type Effects,
   type Infer,
+  type HostPattern,
 } from '@interfacer/dsl';
 
 export const balanceInput = fields({
@@ -91,6 +92,8 @@ export interface BalanceFlowOptions {
    * to become a hard failure without them.
    */
   readonly withOutcomes?: boolean;
+  /** Hosts the flow declares, for the tests about what the artifact permits. */
+  readonly allowlist?: readonly HostPattern[];
 }
 
 /** Sign in, look an account up, read its balance. Read-only, so no `.commit()`. */
@@ -99,6 +102,7 @@ export function balanceFlow(options: BalanceFlowOptions = {}) {
     id: 'checkAccountBalance',
     input: balanceInput,
     ...(options.effects === undefined ? {} : { effects: options.effects }),
+    ...(options.allowlist === undefined ? {} : { allowlist: options.allowlist }),
   })
     .open((i) => i.url, { id: 'login.open' })
     .fillForm(USERNAME_FIELD, (i) => i.username, { id: 'login.username' })

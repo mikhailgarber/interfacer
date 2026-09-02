@@ -496,6 +496,19 @@ The runner config is the tier/location mapping and timeouts. These are real
 decisions that nothing has made yet, listed here so they are not mistaken for
 settled:
 
+- **Whether steering is enough to get `dataClasses` asked about** — it is the one
+  guardrail-shaped declaration the model may still record for itself. It decides
+  whether a screenshot is masked and whether a DOM snapshot keeps its values, and
+  a live run against a public site settled `non-identifying` without the question
+  being put at all, then captured a signed-in session showing third parties'
+  names unmasked. The interview prompt now requires asking what is on the screens
+  before recording it, and distinguishes what a run *returns* from what it *sees*
+  — but that is model compliance, and a prompt rule is not a testable property, so
+  nothing in the suite holds it. The alternative, considered and declined for
+  cost, is adding it to `GUARDED` so it must be proposed and confirmed like the
+  allowlist and `securityEffect`; that would also make every existing interview
+  file that omits it a missing answer. *(Phase 9, if a run shows the steering
+  failing)*
 - **Whether steering is enough to keep exploration out of the artifact** —
   discovery takes the shortest path to the goal because the brief tells it to,
   and each outcome is provoked in a dedicated run afterwards. That is model

@@ -245,6 +245,13 @@ async function main(argv: readonly string[], env: NodeJS.ProcessEnv): Promise<nu
       say(`  unverified outcome ${one.outcome.id}${one.why === undefined ? '' : ` — ${one.why}`}`);
     }
 
+    for (const step of generated.wasted) {
+      // Deterministic, unlike everything else reported here: a page opened and
+      // then navigated away from is waste every replay pays for, and the state
+      // it showed was never on screen for an outcome to be detected against.
+      say(`  ${step} opens a page nothing then uses — every run pays for it`);
+    }
+
     if (generated.violation !== undefined) {
       say(`  the flow does not satisfy its own declaration: ${generated.violation.expected}`);
     }
