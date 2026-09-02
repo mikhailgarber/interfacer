@@ -57,13 +57,32 @@ export function keyboard(input: NodeJS.ReadableStream, output: NodeJS.WritableSt
   const reader = createInterface({ input, output: echo, terminal: true });
 
   const ask: Ask = async (question) => {
-    output.write(
-      question.kind === 'confirm' ? `${question.text}\n  accept? [y/N] ` : `${question.text}\n> `,
-    );
+    const marker = question.kind === 'confirm' ? '  accept? [y/N] ' : '> ';
+
+    // The question is written directly and the marker is handed to readline,
+    // which is the whole of the fix for a prompt nobody could see. readline
+    // redraws its line on every keystroke — `ESC[1G` to column one, then
+    // `ESC[0J` to erase — so a marker written behind its back is wiped before
+    // anyone reads it, and it was: a captured session showed the guardrail
+    // confirmation arriving as a bare statement with no visible question. Given
+    // the marker, readline redraws *it* and it survives.
+    //
+    // A blank line first, because the questions run to several lines of prose
+    // and two characters at the end of one is a weak signal that it is somebody
+    // else's turn.
+    output.write(`\n${question.text}\n`);
+
+    // For a secret the marker has to be written here instead: readline sends
+    // its copy through the same stream as the echo, so suppressing one
+    // suppresses the other, and a password prompt showing nothing at all is
+    // worse than the echo it was protecting against.
+    if (question.secret === true) {
+      output.write(marker);
+    }
 
     hidden = question.secret === true;
     const answered = await new Promise<string>((accept) => {
-      reader.question('', accept);
+      reader.question(hidden ? '' : marker, accept);
     });
 
     if (hidden) {

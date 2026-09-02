@@ -152,7 +152,6 @@ async function main(argv: readonly string[], env: NodeJS.ProcessEnv): Promise<nu
   say(
     `interfacer: ${location.path} (${location.state === 'occupied' ? 'updating the project that is there' : 'a new project'})`,
   );
-  say('');
 
   // One reader for the session, released when the session ends — a command
   // that has printed its summary must not sit holding stdin. Absent entirely
@@ -208,7 +207,6 @@ async function main(argv: readonly string[], env: NodeJS.ProcessEnv): Promise<nu
     }
     say('');
     say('interfacer: generation mode — driving the task against the application.');
-    say('');
 
     // The same session goes on. The conversation does not end when the interview
     // does: the model asks for live values as it needs them, and the person
