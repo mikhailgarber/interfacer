@@ -15,6 +15,7 @@
  * them — the flow is already built, and provoking an outcome must not grow it.
  */
 import {
+  answerStatus,
   openExecution,
   resolveTarget,
   addUsage,
@@ -24,12 +25,13 @@ import {
   type Observation,
   type RunOptions,
   type Spend,
+  type TerminalStatus,
   type TargetChain,
 } from '@interfacer/dsl';
 
 import type { Ask } from '../ask.js';
 import type { ContractBrief, Decide, Exchange, ToolCall, ToolDefinition } from '../agent/decide.js';
-import { answerFor, bindValue, TOOLS } from '../agent/tools.js';
+import { answerFor, bindValue, ToolArgumentError, TOOLS } from '../agent/tools.js';
 import type { OutcomeAnswer } from '../interview/contract.js';
 import { rerunFlow } from './rerun.js';
 
@@ -78,7 +80,13 @@ export async function provokeOutcomes(
   let spend: Spend = ZERO_SPEND;
 
   for (const outcome of declared) {
-    if (flow.outcomes.some((one) => one.id === outcome.id)) {
+    // Matched on the declared *status*, not the step id: an outcome's id is
+    // derived from its target unless one was given, so comparing ids matched
+    // the contract's outcome id only by accident — and when it did not, the
+    // outcome was provoked a second time and a second arm declared for the
+    // same status, the later one shadowing the detector discovery had already
+    // proved against a real page.
+    if (flow.outcomes.some((one) => answerStatus(one.map) === outcome.id)) {
       // Discovery reached it on the way past. Nothing to provoke.
       provoked.push({ outcome, verified: true });
       continue;
@@ -137,10 +145,14 @@ async function provokeOne(
     return turn.calls;
   };
 
-  const unverified = (why: string): Attempt => ({
-    result: { outcome, verified: false, why },
-    usage: spend,
-  });
+  // A provocation that did not record a detector did not do the one thing it
+  // was for, and a run that reports success for it hides that from the record.
+  let terminal: TerminalStatus = { ending: 'success' };
+
+  const unverified = (why: string, category: string): Attempt => {
+    terminal = { ending: 'failure', category };
+    return { result: { outcome, verified: false, why }, usage: spend };
+  };
 
   try {
     // Phase one: a value that reaches the state. The person supplies it — they
@@ -174,7 +186,7 @@ async function provokeOne(
     }
 
     if (!bound) {
-      return unverified('no provoking value was obtained');
+      return unverified('no provoking value was obtained', 'not-provoked');
     }
 
     // Phase two: re-run what the flow already holds. A step failing here is the
@@ -182,7 +194,10 @@ async function provokeOne(
     // the page in front of us is the one the detector has to match.
     const reached = await rerunFlow(execution, flow);
     if (reached.stoppedAt === undefined) {
-      return unverified('the flow ran to the end with that value: the state was never reached');
+      return unverified(
+        'the flow ran to the end with that value: the state was never reached',
+        'state-not-reached',
+      );
     }
 
     // Phase three: name the condition. The tool refuses a detector that does not
@@ -210,21 +225,42 @@ async function provokeOne(
           });
           continue;
         }
-        flow.outcome(
-          detector,
-          answerFor({ ...call, input: { ...call.input, status: outcome.id } }),
-          {
-            id: outcome.id,
-          },
-        );
+        // Building the answer can reject what the model named — a value source
+        // the tool does not know, a name that is not a declared input. That is
+        // ordinary information here, exactly as it is in the discovery loop:
+        // uncaught, it leaves this frame, escapes `generate`, and takes the
+        // whole session down with every phase that already succeeded.
+        try {
+          flow.outcome(
+            detector,
+            answerFor({ ...call, input: { ...call.input, status: outcome.id } }),
+            {
+              id: outcome.id,
+            },
+          );
+        } catch (error) {
+          results.push({
+            id: call.id,
+            ok: false,
+            detail: error instanceof ToolArgumentError ? error.message : String(error),
+          });
+          continue;
+        }
         return { result: { outcome, verified: true }, usage: spend };
       }
       transcript.push({ kind: 'results', results });
     }
 
-    return unverified('the state was reached but no detector matched it');
+    // The screen a person now has to write a detector against by hand. It is
+    // the only moment in a run where Interfacer knows it is handing work back
+    // and knows exactly which page it is handing back — so it is captured.
+    await execution.evidence(
+      { kind: 'outcome.undetected', status: outcome.id },
+      'undetected-outcome',
+    );
+    return unverified('the state was reached but no detector matched it', 'undetected-outcome');
   } finally {
-    execution.finishedWith({ ending: 'success' });
+    execution.finishedWith(terminal);
     await execution.close();
   }
 }

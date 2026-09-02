@@ -56,6 +56,8 @@ export interface GenerationOptions extends RunOptions {
   readonly model?: string;
   readonly maxTurns?: number;
   readonly stallTurns?: number;
+  /** The turn bound each provocation phase gets. Forwarded to `provokeOutcomes`. */
+  readonly turnsPerPhase?: number;
 }
 
 export interface Generation {
@@ -100,7 +102,7 @@ export async function generate(options: GenerationOptions): Promise<Generation> 
   // are verified against this application before anything is added to them.
   const seed = readSeed(options.root, contract);
   const flow = seed?.flow ?? flowFor(contract);
-  const live = liveValues();
+  const live = liveValues(contract);
 
   // A seeded run verifies before it decides anything, and verifying means
   // *performing* the seed's steps — so its values have to be in hand before the
@@ -108,9 +110,18 @@ export async function generate(options: GenerationOptions): Promise<Generation> 
   // They are still only ever held here.
   if (seed !== undefined && ask !== undefined) {
     for (const input of contract.inputs) {
+      // Except what is already in hand. The entry point is bound before the run
+      // starts, and asking for it again would put a settled answer back to the
+      // person as though nobody had given it.
+      if (live[input.name] !== undefined) {
+        continue;
+      }
       const answered = await ask({
         kind: 'open',
         text: `value for ${input.name}${input.description === undefined ? '' : ` — ${input.description}`}`,
+        // A real credential, typed at a prompt: the channel is told so it does
+        // not echo it onto the screen and into the scrollback.
+        ...(input.kind === 'secret' ? { secret: true } : {}),
       });
       const declared = flow.input[input.name];
       if (declared !== undefined) {
@@ -124,6 +135,7 @@ export async function generate(options: GenerationOptions): Promise<Generation> 
   const discovery = await discover(flow, {
     ...options,
     task: contract.task,
+    entryPoint: contract.entryPoint,
     input: live as never,
     // Nobody to supply the values means nothing to verify against: an
     // unverified seed is the failure seeding exists to prevent, so the run
@@ -153,83 +165,107 @@ export async function generate(options: GenerationOptions): Promise<Generation> 
   // and no complete path to look at: what it has is written, and that is all.
   const reached = discovery.ending === 'returned';
 
-  const outcomes: Provoked[] = [];
-  if (reached && contract.outcomes.length > 0) {
-    const provocations = await provokeOutcomes(flow, contract.outcomes, {
-      ...options,
-      live,
-    });
-    spend = addUsage(spend, provocations.spend);
-    outcomes.push(...provocations.provoked);
-  } else {
-    outcomes.push(
-      ...contract.outcomes.map((outcome) => ({
-        outcome,
-        verified: false,
-        why: reached ? 'not attempted' : 'discovery did not reach the goal',
-      })),
-    );
-  }
-
+  // Hoisted so the emergency write below sees whatever these reached before a
+  // later phase threw: an unconfirmed vendor is absent, not wrong.
   let effects: Effects = contract.effects;
   let vendor: string | undefined;
   let appVersion: string | undefined;
 
-  if (reached) {
-    const proposals = await inspect(flow, { ...options, live });
-    spend = addUsage(spend, proposals.spend);
-
-    vendor = await confirmed(ask, 'vendor', proposals.vendor);
-    appVersion = await confirmed(ask, 'appVersion', proposals.appVersion);
-
-    const revised = await confirmedSecurity(ask, proposals, contract.effects.securityEffect);
-    if (revised !== contract.effects.securityEffect) {
-      effects = { ...contract.effects, securityEffect: revised };
-    }
-  }
-
-  const variant: VariantStamp = {
+  const stamp = (): VariantStamp => ({
     capability: contract.capability,
     ...(vendor === undefined ? {} : { vendor }),
     ...(appVersion === undefined ? {} : { appVersion }),
     recordedAgainst: hostOf(contract.entryPoint),
     recordedOn: (options.now?.() ?? new Date()).toISOString().slice(0, 10),
-  };
-
-  // The flow was checked against its declaration before a browser opened, when
-  // it was empty. It is worth checking again now that it has steps: a capability
-  // whose confirmed effects demand an approval it never records is one every
-  // replay will refuse, and saying so here costs a line rather than a run.
-  const violation = checkSafety(
-    { id: flow.id, effects, steps: flow.steps },
-    { headless: options.headless ?? false },
-  );
-
-  const files = await generateProject({
-    flow,
-    packageName: options.packageName,
-    description: contract.task,
-    variant,
-    ...(effects === contract.effects ? {} : { effects }),
   });
 
-  // An update rewrites what it must and leaves everything else where it is:
-  // Interfacer is authoritative when it runs, and git is what makes that safe.
-  await writeProject(files, options.root);
+  // Everything from here on can throw, and discovery is the expensive,
+  // unrepeatable part of a run: a provider that falls over while an outcome is
+  // being provoked must not also cost the flow that was already proved. So the
+  // project is written on the way out whatever happens, and the failure is
+  // still raised — the operator learns the run failed *and* keeps the work.
+  try {
+    return await finish();
+  } catch (error) {
+    await write();
+    throw error;
+  }
 
-  return {
-    ending: discovery.ending,
-    flow,
-    outcomes,
-    variant,
-    effects,
-    files,
-    root: options.root,
-    ...(seed === undefined ? {} : { seed }),
-    spend,
-    costUsd: rates === undefined ? 0 : spendCost(spend, rates),
-    ...(violation === undefined ? {} : { violation }),
-  };
+  /** Emit the project from whatever the run established before it stopped. */
+  async function write(): Promise<ProjectFiles> {
+    const files = await generateProject({
+      flow,
+      packageName: options.packageName,
+      description: contract.task,
+      variant: stamp(),
+      ...(effects === contract.effects ? {} : { effects }),
+    });
+
+    // An update rewrites what it must and leaves everything else where it is:
+    // Interfacer is authoritative when it runs, and git is what makes that safe.
+    await writeProject(files, options.root);
+    return files;
+  }
+
+  async function finish(): Promise<Generation> {
+    const outcomes: Provoked[] = [];
+    if (reached && contract.outcomes.length > 0) {
+      const provocations = await provokeOutcomes(flow, contract.outcomes, {
+        ...options,
+        live,
+      });
+      spend = addUsage(spend, provocations.spend);
+      outcomes.push(...provocations.provoked);
+    } else {
+      outcomes.push(
+        ...contract.outcomes.map((outcome) => ({
+          outcome,
+          verified: false,
+          why: reached ? 'not attempted' : 'discovery did not reach the goal',
+        })),
+      );
+    }
+
+    if (reached) {
+      const proposals = await inspect(flow, { ...options, live });
+      spend = addUsage(spend, proposals.spend);
+
+      vendor = await confirmed(ask, 'vendor', proposals.vendor);
+      appVersion = await confirmed(ask, 'appVersion', proposals.appVersion);
+
+      const revised = await confirmedSecurity(ask, proposals, contract.effects.securityEffect);
+      if (revised !== contract.effects.securityEffect) {
+        effects = { ...contract.effects, securityEffect: revised };
+      }
+    }
+
+    const variant = stamp();
+
+    // The flow was checked against its declaration before a browser opened, when
+    // it was empty. It is worth checking again now that it has steps: a capability
+    // whose confirmed effects demand an approval it never records is one every
+    // replay will refuse, and saying so here costs a line rather than a run.
+    const violation = checkSafety(
+      { id: flow.id, effects, steps: flow.steps },
+      { headless: options.headless ?? false },
+    );
+
+    const files = await write();
+
+    return {
+      ending: discovery.ending,
+      flow,
+      outcomes,
+      variant,
+      effects,
+      files,
+      root: options.root,
+      ...(seed === undefined ? {} : { seed }),
+      spend,
+      costUsd: rates === undefined ? 0 : spendCost(spend, rates),
+      ...(violation === undefined ? {} : { violation }),
+    };
+  }
 }
 
 /**

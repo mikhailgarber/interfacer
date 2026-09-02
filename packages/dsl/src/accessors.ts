@@ -212,6 +212,23 @@ export function answer<
  * returning `undefined` for every field. The flow checks it where the map is
  * declared, because that is where the fix is.
  */
+/**
+ * The status an answer map declares, where it declares one.
+ *
+ * An outcome's *step id* is derived from its target unless one is given, so it
+ * is not the status and matches it only by accident. Anything that needs to
+ * know which arm of the union a declaration produces — documenting the answers,
+ * or deciding whether an outcome has already been declared — has to read it
+ * from the map, which describes itself precisely so this is possible.
+ */
+export function answerStatus(map: unknown): string | undefined {
+  if (typeof map !== 'function' || !describes(map)) {
+    return undefined;
+  }
+  const { source } = map;
+  return source.from === 'answer' ? source.status : undefined;
+}
+
 export function checkAnswerSources(
   map: unknown,
   allowed: 'input' | 'extracted',

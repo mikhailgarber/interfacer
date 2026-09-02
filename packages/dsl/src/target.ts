@@ -70,6 +70,59 @@ export function strategyRank(target: Target): number {
   return STRATEGY_PREFERENCE.indexOf(target.by);
 }
 
+/** Selectors that count to an element rather than naming it. */
+const POSITIONAL =
+  /:(?:nth-child|nth-of-type|nth-last-child|nth-last-of-type|first-child|last-child|first-of-type|last-of-type|only-child|only-of-type)\b/;
+
+/** Class tokens, once quoted attribute values are out of the way. */
+const CLASS_TOKEN = /\.(-?[A-Za-z_][\w-]*)/g;
+
+/**
+ * Whether a class token looks like a build artifact rather than a name.
+ *
+ * A hashed segment is the tell: `css-4b8a1e`, `_q3Wm1`, `sc-1x2y3z`. Judged per
+ * `-`/`_` segment so that ordinary compound names — `error-banner`, `col-md-6`
+ * — are left alone; a segment has to be long enough to be a hash and mix
+ * letters with digits, which a word does not.
+ */
+function looksGenerated(token: string): boolean {
+  const segments = token.split(/[-_]/).filter((segment) => segment !== '');
+  return segments.some(
+    (segment) => segment.length >= 4 && /[A-Za-z]/.test(segment) && /\d/.test(segment),
+  );
+}
+
+/**
+ * Why a selector encodes incidental structure, or `undefined` where it does not.
+ *
+ * The design excludes generated class names and positional paths outright:
+ * they encode incidental structure and break on any re-render. `css()` still
+ * accepts them, because a hand-written flow may need one as a genuine last
+ * resort and the honest floor is that a page with no semantic markup leaves
+ * nothing better. This is what a *recorder* consults — discovery has the whole
+ * page to choose from, so a target that counts to an element there is a choice
+ * rather than a floor, and it is the choice that goes stale on the day a row is
+ * added above the one that was meant.
+ */
+export function incidentalSelector(selector: string): string | undefined {
+  if (POSITIONAL.test(selector)) {
+    return 'a positional path: it counts to the element rather than naming it, and any re-render can move it';
+  }
+
+  // An attribute value may legitimately contain a dot — `[href="a.b"]` — and it
+  // is not a class token.
+  const bare = selector.replace(/"[^"]*"|'[^']*'/g, '""');
+
+  for (const match of bare.matchAll(CLASS_TOKEN)) {
+    const token = match[1] ?? '';
+    if (looksGenerated(token)) {
+      return `a generated class name (${token}): it is a build artifact and does not survive a rebuild`;
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * Whether a chain is ordered best-first.
  *

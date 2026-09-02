@@ -134,6 +134,15 @@ export type EntryBody =
     }
   | { readonly kind: 'checkpoint'; readonly satisfied: boolean }
   | { readonly kind: 'outcome.matched'; readonly detectorIndex: number; readonly status: string }
+  /**
+   * A declared outcome whose state was reached, but which nothing detected.
+   *
+   * Beside `outcome.matched` because it is the same moment with the opposite
+   * result, and it is the moment a person inherits the work: no detector can be
+   * recorded, so the arm has to be written by hand against the screen this
+   * entry carries.
+   */
+  | { readonly kind: 'outcome.undetected'; readonly status: string }
   | { readonly kind: 'retry'; readonly reason: string; readonly attempt: number }
   | {
       readonly kind: 'pause';

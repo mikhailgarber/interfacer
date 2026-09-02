@@ -4,7 +4,10 @@ import prettier from 'eslint-config-prettier';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  globalIgnores(['**/dist/**', '**/node_modules/**', 'coverage/**']),
+  // `scratch/` holds the projects a manual run writes. Generated code is
+  // emitted to the capability template's posture, not this repo's, so linting
+  // it turns the gate red the moment anyone does a live run.
+  globalIgnores(['**/dist/**', '**/node_modules/**', 'coverage/**', 'scratch/**']),
 
   {
     files: ['**/*.ts', '**/*.js'],

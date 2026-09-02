@@ -10,6 +10,7 @@ import {
   capabilityFrom,
   cited,
   gaps,
+  patchOf,
   IncompleteContract,
   parseArgv,
   recordedAnswers,
@@ -283,8 +284,40 @@ describe('the command line', () => {
     expect(parseArgv(['--help'], '/work')).toBe('help');
   });
 
+  it('takes where the evidence of a discovery run should go', () => {
+    // The same two the generated capability's own CLI takes, spelled the same
+    // way. A discovery run is the one nobody can re-run cheaply, and until now
+    // its record could only be kept by redirecting a shell and its screenshots
+    // not at all.
+    expect(
+      parseArgv(
+        ['mybank', '--record', 'scratch/run.jsonl', '--attachments', 'scratch/evidence'],
+        '/work',
+      ),
+    ).toEqual({
+      projectName: 'mybank',
+      root: '/work',
+      record: { file: 'scratch/run.jsonl' },
+      attachmentDir: 'scratch/evidence',
+    });
+
+    // The two streams by name, because a record is as often read from a pipe as
+    // from a file.
+    expect(parseArgv(['mybank', '--record', 'stderr'], '/work')).toEqual({
+      projectName: 'mybank',
+      root: '/work',
+      record: 'stderr',
+    });
+
+    // Absent rather than defaulted: stdout is the record's default and rich
+    // capture is off, and the invocation carries neither where it was not asked.
+    expect(parseArgv(['mybank'], '/work')).toEqual({ projectName: 'mybank', root: '/work' });
+  });
+
   it('refuses what it cannot act on', () => {
     expect(() => parseArgv([], '/work')).toThrow(BadInvocation);
+    expect(() => parseArgv(['a', '--record'], '/work')).toThrow(BadInvocation);
+    expect(() => parseArgv(['a', '--attachments'], '/work')).toThrow(BadInvocation);
     expect(() => parseArgv(['a', 'b'], '/work')).toThrow(BadInvocation);
     expect(() => parseArgv(['--nope', 'a'], '/work')).toThrow(BadInvocation);
     expect(() => parseArgv(['a', '--root'], '/work')).toThrow(BadInvocation);
@@ -451,5 +484,121 @@ describe("a project's own declarations", () => {
     // Fails toward asking: an unreadable declaration is a question, never an
     // answer nobody gave carried into a generated project.
     expect(gaps(recordedAnswers(scratch())).length).toBeGreaterThan(10);
+  });
+});
+
+// @covers interview.rerun-is-a-delta
+describe('a project discovery did not finish', () => {
+  /** What the generator writes when a run stops before it reaches the goal. */
+  function partial(options: { outcomes?: readonly string[]; complete?: boolean } = {}): string {
+    const { outcomes = [], complete = false } = options;
+    const dir = scratch();
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(
+      join(dir, 'src', 'contract.ts'),
+      [
+        "import { fields, secret, text } from '@interfacer/dsl';",
+        '',
+        'export const inputFields = fields({',
+        "  url: text({ description: 'entry point' }),",
+        '  password: secret(),',
+        '});',
+        '',
+        'export const effects = {',
+        "  mutates: 'read',",
+        "  reversible: 'yes',",
+        "  securityEffect: 'none',",
+        "  scope: 'single',",
+        "  external: 'none',",
+        "  financial: 'none',",
+        '  idempotent: true,',
+        "  dataClasses: ['PII'],",
+        '} as const;',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(dir, 'src', 'flow.ts'),
+      [
+        '// PARTIAL. Discovery stopped before it reached the goal, so this flow',
+        '// declares no .returns() and cannot answer yet.',
+        'export const flow = new Flow({',
+        "  id: 'checkAccountBalance',",
+        '  input: inputFields,',
+        '  effects,',
+        "  allowlist: ['clean.fixture.invalid'],",
+        '})',
+        "  .open(field('url'), { id: 'open' })",
+        ...outcomes.map((id) =>
+          [
+            '  .outcome(',
+            "    [byText('No such account')],",
+            `    answer('${id}', {}),`,
+            `    { id: '${id}' },`,
+            '  )',
+          ].join('\n'),
+        ),
+        ...(complete ? ["  .returns(answer('ok', { balance: extracted('balance') }));"] : []),
+      ].join('\n'),
+    );
+    return dir;
+  }
+
+  it('has not answered what a run can end in, because it never got that far', () => {
+    // A flow that stopped before `.returns()` never reached the state an
+    // outcome detector describes, so its silence about outcomes is an absence
+    // rather than "this task has none" — the one answer a person gives by
+    // saying nothing. Reading it as an answer loses outcomes a person declared,
+    // and the run then generates a capability that cannot report them.
+    const recorded = recordedAnswers(partial());
+
+    expect(recorded.outcomes).toBeUndefined();
+    expect(gaps(recorded).map((gap) => gap.id)).toContain('outcomes');
+  });
+
+  it('is asked again even where it recorded one, because it may not have found them all', () => {
+    // The detector it did record is not lost: it lives in the flow, and a
+    // seeded run re-provokes every outcome anyway. What cannot be recovered is
+    // the one the run stopped before reaching, so the list is put to the person
+    // rather than taken from a run that was interrupted.
+    const recorded = recordedAnswers(partial({ outcomes: ['account_not_found'] }));
+
+    expect(gaps(recorded).map((gap) => gap.id)).toContain('outcomes');
+  });
+
+  it('answers an empty list where the flow did reach the goal', () => {
+    // The guard on the fix above: "this task has no business outcomes" is a
+    // real answer, and a finished flow that declares none is how a project
+    // records it. Only a partial flow's silence means nothing.
+    const recorded = recordedAnswers(partial({ complete: true }));
+
+    expect(recorded.outcomes).toEqual([]);
+    expect(gaps(recorded).map((gap) => gap.id)).not.toContain('outcomes');
+  });
+});
+
+describe('an allowlist the interview accepts', () => {
+  it('refuses a host carrying a port, because such a pattern admits nothing', () => {
+    // A pattern is matched against `URL.hostname`, which never carries a port,
+    // so `127.0.0.1:4001` can never match. The interview produced exactly this
+    // on a live run: a contract that named the host it needed and an allowlist
+    // that admitted no host at all, masked only because the entry point's own
+    // origin is allowed independently of the declared list.
+    expect(() =>
+      patchOf({
+        id: 'call_1',
+        name: 'record',
+        input: { allowlist: ['127.0.0.1:4001'] },
+      }),
+    ).toThrow(/port|host/i);
+  });
+
+  it('takes the same host without one', () => {
+    const patch = patchOf({
+      id: 'call_2',
+      name: 'record',
+      input: { allowlist: ['127.0.0.1', '*.mybank.com'] },
+    });
+
+    expect(patch.allowlist).toEqual(['127.0.0.1', '*.mybank.com']);
   });
 });

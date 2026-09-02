@@ -207,3 +207,25 @@ describe('a capability id that is not an identifier', () => {
     );
   });
 });
+
+describe('the answers a project documents', () => {
+  it('lists the statuses a caller switches on, not the step ids', async () => {
+    // Discovery derives an outcome's step id from its target, so id and status
+    // are equal only by accident. In `balanceCapability` above they *are* equal,
+    // which is exactly why this went unnoticed until a real run produced
+    // `outcome:role=heading name="No such account"` and documented that.
+    const flow = new Flow({ id: 'balanceLookup', input })
+      .open(field('url'), { id: 'open' })
+      .outcome([byRole('heading', 'No such account')], answer('account_not_found'), {
+        id: 'outcome:role=heading name="No such account"',
+      })
+      .returns(answer('balance_found'));
+
+    const readme = (await generateProject({ ...REQUEST, flow })).get('README.md') ?? '';
+
+    expect(readme).toContain('`account_not_found`');
+    // The success arm is an answer too, and the one every caller handles.
+    expect(readme).toContain('`balance_found`');
+    expect(readme).not.toContain('outcome:role=heading');
+  });
+});

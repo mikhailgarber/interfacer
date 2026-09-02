@@ -91,6 +91,25 @@ export function balanceCapability(
     .returns(answer('ok', { balance: extracted('balance') }));
 }
 
+/**
+ * The same capability, stopped before it reached the goal.
+ *
+ * What the generator writes when the stall guard or the budget ends a run: the
+ * steps that worked and no `.returns()`, which is what makes the project
+ * partial. A re-run reads it like any other project and continues from here.
+ */
+export function partialCapability(options: { readonly allowlist?: readonly HostPattern[] } = {}) {
+  return new Flow({
+    id: 'checkAccountBalance',
+    input: balanceInput,
+    ...(options.allowlist === undefined ? {} : { allowlist: options.allowlist }),
+  })
+    .open(field('url'), { id: 'login.open' })
+    .fillForm(USERNAME, field('username'), { id: 'login.username' })
+    .fillForm(PASSWORD, field('password'), { id: 'login.password' })
+    .pressButton(SIGN_IN, { id: 'login.submit' });
+}
+
 /** The same capability with a path joined onto the entry point, and a pause. */
 export function attendedCapability() {
   return new Flow({ id: 'checkAccountBalance', input: balanceInput })

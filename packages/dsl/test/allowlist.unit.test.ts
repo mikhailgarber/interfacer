@@ -111,6 +111,15 @@ describe('checkAllowlist', () => {
       ['an interior wildcard', 'auth.*.mybank.com'],
       ['a trailing wildcard', 'mybank.*'],
       ['an empty pattern', ''],
+      // Silently inert rather than malformed-looking: a pattern is matched
+      // against `URL.hostname`, which never carries a port or a scheme, so
+      // these can never match anything. A live run declared `127.0.0.1:4001`
+      // and ran with an allowlist entry that admitted nothing — masked only
+      // because the entry point's own origin is allowed independently.
+      ['a host with a port', '127.0.0.1:4001'],
+      ['a named host with a port', 'auth.mybank.com:8443'],
+      ['a whole URL', 'https://mybank.com'],
+      ['a host with a path', 'mybank.com/login'],
     ])('throws on %s', (_name, pattern) => {
       // A malformed pattern is a defect in the artifact, not a condition met at
       // run time — so it fails loudly rather than quietly denying (or worse,

@@ -142,3 +142,9 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 .DS_Store
+
+# Where a manual run of Interfacer is pointed: `npx interfacer <name> --root scratch`.
+# A generated capability is a real project — node_modules, dist, a vendored DSL — and
+# it is written here so it can be read in the editor without becoming a diff. Tests
+# never write here; they generate outside the source tree entirely.
+scratch/

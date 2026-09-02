@@ -32,11 +32,12 @@ Those two are the only docs claiming to describe the present state, so they are 
 only two that go stale in a way that misleads. A README still announcing an earlier
 phase, or a testing doc listing a settled question as open, reads as fact.
 
-Specifically: README's **status**, **layout** and commands block; testing.md's tier
-table, test locations, running-it commands, and its **"not yet decided"** list — move
-an item out of that list the moment the phase owning it settles the question, and add
-one when a new open question appears. A new `package.json` script means a new line in
-the docs that list commands; a script nothing documents is a script nobody runs.
+Specifically: README's **status**, **features**, **layout** and commands block;
+testing.md's tier table, test locations, running-it commands, and its
+**"not yet decided"** list — move an item out of that list the moment the phase owning
+it settles the question, and add one when a new open question appears. A new
+`package.json` script means a new line in the docs that list commands; a script nothing
+documents is a script nobody runs.
 
 ## the gate
 

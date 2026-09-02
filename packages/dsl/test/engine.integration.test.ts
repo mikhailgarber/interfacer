@@ -7,8 +7,10 @@ import {
   byRole,
   byText,
   css,
+  field,
   fields,
   Flow,
+  InputMissing,
   isReplayError,
   makeSecret,
   NavigationBlocked,
@@ -344,6 +346,50 @@ describe('retry gating', () => {
     );
 
     expect(answer).toEqual({ status: 'ok', reference: 'TRF-000417' });
+  });
+});
+
+describe('a step whose input was never supplied', () => {
+  it('fails as a typed error naming the input, not as a crash inside the engine', async () => {
+    // Discovery fills this map as the model asks for values, so a step can
+    // genuinely reach a field that has none yet — and what came back was
+    // `TypeError: Cannot read properties of undefined (reading 'reveal')`,
+    // which is not a failure a caller can act on and not one the agent loop can
+    // relay as information. `field()` is what makes the better message
+    // possible: an accessor that carries what it reads can say what is missing.
+    const flow = new Flow({ id: 'unsupplied', input: balanceInput })
+      .open(field('url'), { id: 'login.open' })
+      .fillForm(USERNAME_FIELD, field('username'), { id: 'login.username' })
+      .returns(() => ({ status: 'ok' as const }));
+
+    const missing = { url: url('clean'), password: makeSecret(SENTINEL), accountRef: 'ACC-1001' };
+    const error = await rejection(
+      runFlow(flow, missing as unknown as BalanceInput, { ...RUN, browser }),
+    );
+
+    expect(error).toBeInstanceOf(InputMissing);
+    expect(error.step).toBe('login.username');
+    // The input by name, not the target chain: `label="Username"` would satisfy
+    // a looser assertion while saying nothing about what is actually missing.
+    expect(error.expected).toContain('a value for input "username"');
+  });
+
+  it('says what it can where the accessor is a closure that cannot describe itself', async () => {
+    // A plain `i => i.username` stays a legal accessor and always will; it
+    // simply cannot say which input it read, so the message says that much
+    // rather than naming the wrong thing.
+    const flow = new Flow({ id: 'unsupplied', input: balanceInput })
+      .open((i) => i.url, { id: 'login.open' })
+      .fillForm(USERNAME_FIELD, (i) => i.username, { id: 'login.username' })
+      .returns(() => ({ status: 'ok' as const }));
+
+    const missing = { url: url('clean'), password: makeSecret(SENTINEL), accountRef: 'ACC-1001' };
+    const error = await rejection(
+      runFlow(flow, missing as unknown as BalanceInput, { ...RUN, browser }),
+    );
+
+    expect(error).toBeInstanceOf(InputMissing);
+    expect(error.observed).toContain('nothing');
   });
 });
 

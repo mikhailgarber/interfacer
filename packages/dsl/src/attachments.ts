@@ -26,8 +26,18 @@ import type { Page } from 'playwright';
 
 import { STRUCTURAL_ATTRIBUTES, VALUE_BEARING, type EvidencePolicy } from './effects.js';
 
-/** The three moments rich capture happens, and nothing else. */
-export type AttachmentTrigger = 'hard-failure' | 'control-transfer' | 'commit';
+/** The four moments rich capture happens, and nothing else. */
+export type AttachmentTrigger =
+  | 'hard-failure'
+  | 'control-transfer'
+  | 'commit'
+  /**
+   * An outcome whose state was reached but which no detector matched.
+   *
+   * The one a person has to finish by hand, which makes the screen it was on
+   * the only thing that makes finishing it possible.
+   */
+  | 'undetected-outcome';
 
 export type AttachmentKind = 'screenshot' | 'dom';
 

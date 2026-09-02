@@ -266,6 +266,57 @@ describe('a run that reaches the goal', () => {
   }, 60_000);
 });
 
+// @covers tenant.entry-point-is-an-input
+describe('the entry point the interview settled', () => {
+  it('is a declared input of the capability, supplied rather than asked for again', async () => {
+    // The interview records the entry point as its own answer, not as one of
+    // the inputs a person lists — so a contract that names three inputs is the
+    // normal case, and it is Interfacer's job to make the fourth. Without it
+    // the model has no input to open by name: in a live run it inferred a host
+    // from the allowlist and recorded `open(literal('http://127.0.0.1:4001/'))`
+    // — a project that only ever works against the tenant it was recorded on,
+    // and the wrong page, since the entry point declared was `/login`.
+    const root = scratch();
+    const { ask, asked } = person({
+      'sign in as': LIVE.username,
+      password: LIVE.password,
+      'which account': LIVE.accountRef,
+    });
+
+    const generated = await generate({
+      ...QUIET,
+      contract: contract(bundle.fixtures.clean.url, {
+        inputs: [
+          { name: 'username', kind: 'text' },
+          { name: 'password', kind: 'secret' },
+          { name: 'accountRef', kind: 'text', description: 'account to look up' },
+        ],
+      }),
+      // The same turns as a reaching run, minus the question about where to
+      // start: the model does not have to ask for what the interview settled.
+      decide: script(...reachTheGoal().slice(1), ...provokeAndInspect()),
+      ask,
+      browser,
+      root,
+      packageName: 'mybank-balance',
+      now: () => new Date('2026-09-01T00:00:00.000Z'),
+    });
+
+    expect(generated.ending).toBe('returned');
+
+    // Declared, so the generated CLI takes a `--url` and one artifact serves
+    // every tenant that differs only in where it lives.
+    expect(readFileSync(join(root, 'src', 'contract.ts'), 'utf8')).toContain('url: text(');
+    expect(readFileSync(join(root, 'src', 'flow.ts'), 'utf8')).toContain(".open(field('url')");
+
+    // Nobody was asked for it: it is an answer already given, and re-asking a
+    // settled answer is the second pass a rerun exists to avoid.
+    expect(
+      asked.filter((question) => /where does this start|value for url/i.test(question)),
+    ).toEqual([]);
+  }, 60_000);
+});
+
 // @covers variant.stamp-is-written variant.not-a-runtime-check
 describe('the variant stamp', () => {
   it('is written from what the pages revealed and what the person confirmed', async () => {
@@ -610,5 +661,158 @@ describe('a seeded run', () => {
     expect(discovery.seeded?.stoppedAt).toBeUndefined();
     expect(discovery.seeded?.kept).toHaveLength(4);
     expect(carried.steps).toHaveLength(4);
+  }, 60_000);
+});
+
+// @covers record.attachments-on-undetected-outcome
+describe('an outcome reached but not detected', () => {
+  it('captures the screen a person will have to write the detector against', async () => {
+    const root = scratch();
+    const dir = mkdtempSync(join(tmpdir(), 'interfacer-undetected-'));
+    const entries: Entry[] = [];
+    const { ask } = person({
+      'where does this start': bundle.fixtures.clean.url,
+      'sign in as': LIVE.username,
+      password: LIVE.password,
+      'which account': LIVE.accountRef,
+      'not exist': 'ACC-9999',
+    });
+
+    const generated = await generate({
+      ...QUIET,
+      contract: contract(bundle.fixtures.clean.url),
+      decide: script(
+        ...reachTheGoal(),
+        turn({ name: 'ask', input: { question: 'which does not exist?', for: 'accountRef' } }),
+        // The value reaches the state; the model then never names a detector
+        // for it, which is the case a person has to finish by hand.
+        turn({ name: 'snapshot', input: {} }),
+      ),
+      ask,
+      browser,
+      root,
+      packageName: 'mybank-balance',
+      record: (entry) => entries.push(entry),
+      attachmentDir: dir,
+      turnsPerPhase: 1,
+    });
+
+    expect(generated.outcomes[0]?.verified).toBe(false);
+    expect(generated.outcomes[0]?.why).toBe('the state was reached but no detector matched it');
+
+    const undetected = entries.find((entry) => entry.kind === 'outcome.undetected');
+    expect(undetected?.attachments?.map((one) => one.kind).sort()).toEqual(['dom', 'screenshot']);
+    expect(undetected?.attachments?.every((one) => one.trigger === 'undetected-outcome')).toBe(
+      true,
+    );
+
+    // And the run says it failed at the one thing it was for, rather than
+    // reporting the success of having completed without throwing.
+    expect(
+      entries.some(
+        (entry) =>
+          entry.kind === 'run.finished' &&
+          entry.status.ending === 'failure' &&
+          entry.status.category === 'undetected-outcome',
+      ),
+    ).toBe(true);
+  }, 60_000);
+});
+
+describe('a malformed tool argument while provoking', () => {
+  it('is handed back to the model instead of taking the session down', async () => {
+    // A live run died here: the model named a value source the tool does not
+    // know, `answerFor` threw `ToolArgumentError` from outside any catch, and
+    // the exception went through `generate` to the top of the process. Every
+    // phase before it — a completed discovery and a provoked outcome — was lost
+    // with it. The same class of mistake is ordinary information in `loop.ts`.
+    const root = scratch();
+    const { ask } = person({
+      'where does this start': bundle.fixtures.clean.url,
+      'sign in as': LIVE.username,
+      password: LIVE.password,
+      'which account': LIVE.accountRef,
+      'not exist': 'ACC-9999',
+    });
+
+    const generated = await generate({
+      ...QUIET,
+      contract: contract(bundle.fixtures.clean.url),
+      decide: script(
+        ...reachTheGoal(),
+        turn({ name: 'ask', input: { question: 'which does not exist?', for: 'accountRef' } }),
+        // `values` names no source the tool knows.
+        turn({
+          name: 'outcome',
+          input: { status: 'account_not_found', detector: NOT_FOUND, values: { ref: {} } },
+        }),
+        // Corrected on the next turn, which is only possible if the first did
+        // not end the process.
+        turn({
+          name: 'outcome',
+          input: {
+            status: 'account_not_found',
+            detector: NOT_FOUND,
+            values: { ref: { from: 'input', name: 'accountRef' } },
+          },
+        }),
+        turn({ name: 'stamp', input: {} }),
+      ),
+      ask,
+      browser,
+      root,
+      packageName: 'mybank-balance',
+      record: () => undefined,
+    });
+
+    expect(generated.outcomes[0]?.verified).toBe(true);
+    expect(readFileSync(join(root, 'src', 'flow.ts'), 'utf8')).toContain('.outcome(');
+  }, 60_000);
+});
+
+describe('a phase that throws after discovery has succeeded', () => {
+  it('still leaves the project on disk, because the work is already done', async () => {
+    // `writeProject` is the last statement of `generate`, so anything thrown by
+    // provocation or inspection used to discard a completed discovery — the one
+    // expensive, unrepeatable part of a run. The design's promise is that the
+    // flow is written whatever stops the run; that has to hold here too.
+    const root = scratch();
+    const { ask } = person({
+      'where does this start': bundle.fixtures.clean.url,
+      'sign in as': LIVE.username,
+      password: LIVE.password,
+      'which account': LIVE.accountRef,
+      'not exist': 'ACC-9999',
+    });
+
+    // Built once: a script rebuilt per call would replay its first turn forever.
+    const discovery = script(...reachTheGoal());
+    let turns = 0;
+    const failsAfterDiscovery: Decide = (state, tools) => {
+      turns += 1;
+      // Every turn discovery needs, and then nothing but an exception — so what
+      // throws is a phase that runs *after* discovery has already succeeded.
+      return turns > reachTheGoal().length
+        ? Promise.reject(new Error('the provider fell over'))
+        : discovery(state, tools);
+    };
+
+    await expect(
+      generate({
+        ...QUIET,
+        contract: contract(bundle.fixtures.clean.url),
+        decide: failsAfterDiscovery,
+        ask,
+        browser,
+        root,
+        packageName: 'mybank-balance',
+        record: () => undefined,
+      }),
+    ).rejects.toThrow('the provider fell over');
+
+    // The failure is still a failure — but the flow discovery proved survives it.
+    const written = readFileSync(join(root, 'src', 'flow.ts'), 'utf8');
+    expect(written).toContain('.pressButton(');
+    expect(written).toContain('.extract(');
   }, 60_000);
 });

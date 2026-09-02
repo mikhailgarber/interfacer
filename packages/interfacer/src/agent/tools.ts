@@ -23,6 +23,7 @@ import {
   asText,
   extracted,
   field,
+  incidentalSelector,
   join,
   literal,
   makeSecret,
@@ -32,6 +33,7 @@ import {
   type FieldSet,
   type Flow,
   type Step,
+  type Target,
   type TargetChain,
 } from '@interfacer/dsl';
 
@@ -325,10 +327,32 @@ function requireName(value: ValueSpec): string {
 
 const PARSES = { text: asText, number: asNumber, money: asMoney } as const;
 
+/**
+ * Every target the model proposes passes through here.
+ *
+ * Which makes it the place the design's exclusion is enforced: generated class
+ * names and positional paths encode incidental structure and break on any
+ * re-render, so a recorder may not record one. The refusal is a tool result
+ * rather than a run-ending error — a step that fails is information, and the
+ * next move is a different target.
+ */
 function chain(raw: unknown): TargetChain {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new ToolArgumentError('a target must be a non-empty chain');
   }
+
+  for (const target of raw as readonly Target[]) {
+    if (target.by !== 'css') {
+      continue;
+    }
+    const why = incidentalSelector(target.selector);
+    if (why !== undefined) {
+      throw new ToolArgumentError(
+        `${target.selector} is ${why}. Target the element by something the page gives it — a role and name, a label, its text, or an id or test id it carries.`,
+      );
+    }
+  }
+
   return raw as unknown as TargetChain;
 }
 

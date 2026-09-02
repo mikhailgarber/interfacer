@@ -302,6 +302,26 @@ describe('run from the command line', () => {
     expect(JSON.parse(ran.stdout)).toEqual({ status: 'ok', balance: 1250.75 });
   });
 
+  it('serves a second tenant with nothing changed but --url', async () => {
+    // What the entry point being an ordinary input buys, at the surface a
+    // person uses: the same built artifact, pointed at a differently styled and
+    // differently worded deployment of the same product.
+    const ran = await cli(
+      [
+        '--url',
+        bundle.fixtures.rebranded.url,
+        '--username',
+        'teller1',
+        '--account-ref',
+        'ACC-1001',
+      ],
+      CREDENTIAL,
+    );
+
+    expect(ran.code).toBe(0);
+    expect(JSON.parse(ran.stdout)).toEqual({ status: 'ok', balance: 1250.75 });
+  });
+
   it('does the same for a business outcome, because both are answers', async () => {
     const ran = await cli(
       ['--url', bundle.fixtures.clean.url, '--username', 'teller1', '--account-ref', 'ACC-9999'],

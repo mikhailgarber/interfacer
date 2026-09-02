@@ -16,7 +16,7 @@ import {
 } from 'interfacer';
 import { describe, expect, it } from 'vitest';
 
-import { balanceCapability, variant } from './capability.js';
+import { balanceCapability, partialCapability, variant } from './capability.js';
 
 /**
  * The interview, conducted by a scripted model.
@@ -331,6 +331,48 @@ describe('a rerun against an existing project', () => {
     ]);
   });
 
+  it('asks what a run can end in again where the last one stopped early', async () => {
+    // A partial project is the normal outcome of a stalled or budget-stopped
+    // run, and the flow it wrote declares no outcomes because it never reached
+    // one — not because the person said there are none. Reading that as an
+    // answer is how two declared outcomes went missing in a live session: the
+    // question was never outstanding, so the model never recorded what it was
+    // told, and the capability that was generated could not report either.
+    const dir = scratch();
+    const files = await generateProject({
+      flow: partialCapability({ allowlist: ['clean.fixture.invalid', '*.fixture.invalid'] }),
+      packageName: 'mybank-balance',
+      description: 'Read a checking account balance.',
+      variant,
+    });
+    await writeProject(files, join(dir, 'mybank-balance'));
+
+    const seed = recordedAnswers(join(dir, 'mybank-balance'));
+
+    const { converse, seen } = script(
+      turn({
+        name: 'record',
+        input: {
+          task: 'read the balance of an account',
+          entryPoint: 'https://mybank.invalid/',
+          output: 'status ok with the balance',
+          outcomes: [{ id: 'account_not_found', description: 'no account with that reference' }],
+        },
+      }),
+      turn({ name: 'settled', input: {} }),
+    );
+
+    const result = await interview({
+      converse,
+      ask: () => Promise.resolve('go on'),
+      seed,
+      rerun: true,
+    });
+
+    expect(seen[0]?.outstanding.map((gap) => gap.id)).toContain('outcomes');
+    expect(result.contract?.outcomes.map((outcome) => outcome.id)).toEqual(['account_not_found']);
+  });
+
   it('writes no interview file back', async () => {
     const project = await existing();
     const before = readdirSync(project, { recursive: true, encoding: 'utf8' }).sort();
@@ -357,5 +399,39 @@ describe('a rerun against an existing project', () => {
     // the flow by hand — which the flow is meant to be.
     expect(readdirSync(project, { recursive: true, encoding: 'utf8' }).sort()).toEqual(before);
     expect(readFileSync(path, 'utf8')).toBe(FILE);
+  });
+});
+
+describe('a turn that calls no tool, mid-interview', () => {
+  it('is recovered from rather than derailing the contract', async () => {
+    // A refusal comes back as an assistant message with no content at all —
+    // `stop_reason: "refusal"`, zero blocks — which is indistinguishable here
+    // from any other turn that called nothing. The interview must survive it:
+    // an empty exchange rendered into the conversation is a message the
+    // provider rejects, and it poisons every request built afterwards.
+    const { converse, seen } = script(
+      turn(),
+      turn(
+        { name: 'record', input: ORDINARY },
+        {
+          name: 'record',
+          input: {
+            allowlist: ['mybank.invalid', 'auth.mybank.invalid'],
+            effects: { securityEffect: 'none' },
+            budgetUsd: 4,
+            citation: 'may visit mybank.invalid and auth.mybank.invalid',
+          },
+        },
+      ),
+      turn({ name: 'settled', input: {} }),
+    );
+
+    const result = await interview({ converse, file: FILE });
+
+    expect(result.ending).toBe('settled');
+    expect(result.contract?.capability).toBe('checkAccountBalance');
+
+    const said = (seen.at(-1)?.transcript ?? []).filter((one) => one.kind === 'nudge');
+    expect(said).toHaveLength(1);
   });
 });

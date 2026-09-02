@@ -24,6 +24,7 @@ export {
   asNumber,
   asText,
   checkAnswerSources,
+  answerStatus,
   describes,
   extracted,
   field,
@@ -57,6 +58,7 @@ export {
   byText,
   css,
   describeTarget,
+  incidentalSelector,
   isBestFirst,
   namesOf,
   strategyRank,
@@ -68,6 +70,7 @@ export {
 } from './target.js';
 
 export {
+  assertUsablePattern,
   checkAllowlist,
   type AllowlistDecision,
   type DenialReason,
@@ -142,6 +145,7 @@ export {
   ApprovalDenied,
   CheckpointFailed,
   EffectsRefused,
+  InputMissing,
   InteractionFailed,
   isReplayError,
   NavigationBlocked,

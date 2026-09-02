@@ -15,6 +15,7 @@
 import {
   addUsage,
   describeTarget,
+  InputMissing,
   isReplayError,
   openExecution,
   ratesFor,
@@ -40,6 +41,7 @@ import {
   type Exchange,
   type ToolCall,
   type ToolResult,
+  NO_CALL,
 } from './decide.js';
 import { answerFor, appendStep, bindValue, TOOL_NAMES, TOOLS, ToolArgumentError } from './tools.js';
 
@@ -102,6 +104,8 @@ export interface DiscoveryOptions<I extends FieldSet = FieldSet> extends RunOpti
   readonly stallTurns?: number;
   /** Declared outcomes still needing a detector, for the model's brief. */
   readonly outcomes?: readonly string[];
+  /** Where the task starts, for the model's brief. Its value is already bound. */
+  readonly entryPoint?: string;
   /**
    * The flow already has steps: verify them before deciding anything new.
    *
@@ -122,6 +126,14 @@ export type Ending =
   | 'budget-exhausted'
   | 'stalled'
   | 'turn-limit'
+  /**
+   * The provider refused, and went on refusing.
+   *
+   * Distinct from `stalled` because the two ask different things of whoever
+   * reads the record: a stall is the model going in circles on a page, and a
+   * refusal is the request never being answered at all.
+   */
+  | 'refused'
   /** The engine raised a hard failure the loop could not continue past. */
   | 'failed';
 
@@ -198,6 +210,7 @@ export async function discover<I extends FieldSet>(
   const transcript: Exchange[] = [];
   const contract: ContractBrief = {
     capability: flow.id,
+    ...(options.entryPoint === undefined ? {} : { entryPoint: options.entryPoint }),
     inputNames: Object.keys(flow.input),
     outcomes: options.outcomes ?? [],
     allowlist: [...flow.declaredAllowlist],
@@ -206,6 +219,7 @@ export async function discover<I extends FieldSet>(
   let spend: Spend = ZERO_SPEND;
   let turns = 0;
   let quiet = 0;
+  let refusals = 0;
   let lastSignature = '';
   let failure: Error | undefined;
 
@@ -256,7 +270,53 @@ export async function discover<I extends FieldSet>(
 
       turns += 1;
       spend = addUsage(spend, turn.usage);
-      transcript.push({ kind: 'called', text: turn.text, calls: turn.calls });
+      transcript.push({
+        kind: 'called',
+        text: turn.text,
+        calls: turn.calls,
+        ...(turn.reasoning === undefined ? {} : { reasoning: turn.reasoning }),
+      });
+
+      if (turn.refusal !== undefined) {
+        // Named rather than left to look like indecision, and counted: one
+        // refusal is a property of one request and worth answering, but a
+        // provider that goes on refusing is not a run that is merely stalling.
+        refusals += 1;
+        execution.record({
+          kind: 'model.turn',
+          reason: `refused (${turn.refusal.category})${turn.refusal.explanation === undefined ? '' : `: ${turn.refusal.explanation}`}`,
+          tool: 'none',
+          usage: turn.usage,
+          costUsd: rates === undefined ? 0 : costNow(),
+        });
+        if (refusals >= stallTurns) {
+          ending = 'refused';
+          break;
+        }
+      } else if (turn.calls.length > 0) {
+        refusals = 0;
+      }
+
+      if (turn.calls.length === 0) {
+        // A turn that called nothing has no result to report, and a `tool_result`
+        // needs a call to answer — so the alternative to saying something here is
+        // an empty user message, which the provider rejects and which poisons
+        // every request built from the transcript afterwards. Saying what was
+        // wrong is well-formed *and* changes the input, so the next turn is not a
+        // replay of the one that produced nothing. The turn, stall and budget
+        // bounds still cap how long this can go on.
+        if (turn.refusal === undefined) {
+          execution.record({
+            kind: 'model.turn',
+            reason: turn.responseShape ?? 'the turn called no tool',
+            tool: 'none',
+            usage: turn.usage,
+            costUsd: rates === undefined ? 0 : costNow(),
+          });
+        }
+        transcript.push({ kind: 'nudge', text: NO_CALL });
+        continue;
+      }
 
       const results: ToolResult[] = [];
       let appended = false;
@@ -324,7 +384,17 @@ export async function discover<I extends FieldSet>(
       switch (call.name) {
         case 'snapshot': {
           const seen = await execution.observe();
-          say(true, `${seen.title} — ${seen.url}\n\n${seen.tree}`);
+          say(
+            true,
+            [
+              `${seen.title} — ${seen.url}`,
+              '',
+              seen.tree,
+              ...(seen.values === ''
+                ? []
+                : ['', 'Value-bearing elements, by what identifies them:', seen.values]),
+            ].join('\n'),
+          );
           return { appended: false };
         }
 
@@ -344,9 +414,24 @@ export async function discover<I extends FieldSet>(
 
         case 'ask': {
           const asked = call.input.question;
-          const answered = await ask(typeof asked === 'string' ? asked : '');
+          const wanted =
+            typeof call.input.for === 'string' ? flow.input[call.input.for] : undefined;
+          const credential = wanted?.kind === 'secret';
+          const answered = await ask(typeof asked === 'string' ? asked : '', credential);
           const bound = bind(call.input.for, answered);
-          say(true, bound === undefined ? answered : `${answered} — bound to ${bound}`);
+          say(
+            true,
+            // A live value for a `secret()` input is a real credential, and the
+            // model has no use for it: it fills the field by naming the input,
+            // and the engine is what reveals the value. Putting it in the tool
+            // result would send it to the provider and keep it in the
+            // transcript every turn after, for nothing.
+            bound === undefined
+              ? answered
+              : credential
+                ? `bound to ${bound}`
+                : `${answered} — bound to ${bound}`,
+          );
           return { appended: false };
         }
 
@@ -426,22 +511,39 @@ export async function discover<I extends FieldSet>(
       return { appended: true, ...(reached === undefined ? {} : { ending: 'returned' as const }) };
     } catch (error) {
       flow.retract(step);
-      say(
-        false,
-        isReplayError(error) ? `${error.expected} — observed ${error.observed}` : String(error),
-      );
+      say(false, whyItFailed(error));
       return { appended: false };
     }
   }
 
-  async function ask(question: string): Promise<string> {
+  /**
+   * What the model is told about a step that did not work.
+   *
+   * A failed step is information, and information is only useful if it names
+   * the next move. For a declared input with no value the next move is not a
+   * different target — it is a question to the person, which the model has no
+   * reason to reach for unless it is said: the live-value map fills as it asks,
+   * and until it does, the field it is aiming at is empty for a reason no
+   * observation of the page reveals.
+   */
+  function whyItFailed(error: unknown): string {
+    if (error instanceof InputMissing) {
+      return `${error.expected}, and nothing has supplied one — ask the person for it with the ask tool, naming the input in \`for\`, then try this step again`;
+    }
+    return isReplayError(error) ? `${error.expected} — observed ${error.observed}` : String(error);
+  }
+
+  async function ask(question: string, credential = false): Promise<string> {
     if (options.ask === undefined) {
       return 'there is nobody to ask; carry on with what the page gives you';
     }
     // The answer is whatever the person says. A live value they give here is
     // held for the run and written nowhere — not into the project, not into the
     // record — so nothing about it reaches the artifact but its input name.
-    return options.ask({ kind: 'open', text: question });
+    // Whether the answer is a credential is Interfacer's to know: the model
+    // names the input in `for`, and the declaration is what says it is a
+    // `secret()`. A channel that echoes what it reads needs telling.
+    return options.ask({ kind: 'open', text: question, ...(credential ? { secret: true } : {}) });
   }
 
   /**

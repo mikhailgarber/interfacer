@@ -138,8 +138,9 @@ function outcomesOf(source: string | undefined): readonly OutcomeAnswer[] | unde
     }
   }
 
-  // A flow that declares none is a real answer — but only where a flow was read
-  // at all, which the caller decides by whether the module was there.
+  // A flow that declares none may be a real answer, but this cannot tell: it
+  // reads the calls and not whether the run that wrote them finished. The
+  // caller decides, from whether the flow reached a `.returns()`.
   return outcomes;
 }
 
@@ -222,7 +223,13 @@ export function recordedAnswers(dir: string): ContractDraft {
 
   const inputs = inputsOf(contract);
   const output = outputOf(flow);
-  const outcomes = outcomesOf(flow);
+  // Only a flow that reached the goal has answered this. A partial one stopped
+  // before `.returns()`, which means it never reached the states an outcome
+  // detector describes either — so its empty list is an absence, not the "this
+  // task has no business outcomes" a person gives by saying so. Read the other
+  // way, a run that stalled would silently retract outcomes somebody declared,
+  // and the capability it generates could not report them.
+  const outcomes = output === undefined ? undefined : outcomesOf(flow);
   const interactions = interactionsOf(index);
 
   return {

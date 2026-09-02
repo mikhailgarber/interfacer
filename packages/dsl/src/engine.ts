@@ -20,13 +20,15 @@
  */
 import { chromium, type Browser, type Page, type Request, type Route } from 'playwright';
 
+import { describes } from './accessors.js';
 import { checkAllowlist, type HostPattern } from './allowlist.js';
 import { capture, type AttachmentTrigger } from './attachments.js';
-import { evidencePolicyFor, redactUrl, VALUE_BEARING } from './effects.js';
+import { evidencePolicyFor, redactUrl, STRUCTURAL_ATTRIBUTES, VALUE_BEARING } from './effects.js';
 import {
   ApprovalDenied,
   CheckpointFailed,
   EffectsRefused,
+  InputMissing,
   InteractionFailed,
   NavigationBlocked,
   PauseExpired,
@@ -146,6 +148,64 @@ function describeChain(chain: TargetChain): string {
   return chain.map(describeTarget).join(' | ');
 }
 
+/**
+ * The attributes that identify a node without carrying what it holds.
+ *
+ * `STRUCTURAL_ATTRIBUTES` minus `class`: a generated class name is exactly what
+ * targeting excludes, so offering one would be proposing the target the
+ * recorder then refuses.
+ */
+const IDENTIFYING = STRUCTURAL_ATTRIBUTES.filter((name) => name !== 'class');
+
+/** How many value nodes are worth showing. A page of rows is not a target list. */
+const VALUE_NODE_LIMIT = 40;
+
+/**
+ * As much of an element as the page-side function below needs.
+ *
+ * Written out rather than reached for: this package does not compile with the
+ * DOM library — nothing in it runs in a browser except the functions Playwright
+ * ships over — so `Element` is not a type here.
+ */
+interface Identifiable {
+  readonly tagName: string;
+  hasAttribute(name: string): boolean;
+  getAttribute(name: string): string | null;
+}
+
+/**
+ * What identifies each value-bearing node on the page.
+ *
+ * Names only — the attribute values here are `id`, `name`, `data-testid` and the
+ * aria labels, which say what a field *is*. What the field holds stays in the
+ * tree, where it already was.
+ */
+async function valueNodes(page: Page): Promise<string> {
+  try {
+    const found = await page.$$eval(
+      VALUE_BEARING,
+      (nodes: readonly Identifiable[], attributes: readonly string[]) =>
+        nodes
+          .map((node) => {
+            const named = attributes
+              .filter((name) => node.hasAttribute(name))
+              .map((name) => `${name}="${node.getAttribute(name) ?? ''}"`);
+            return named.length === 0
+              ? undefined
+              : `${node.tagName.toLowerCase()} ${named.join(' ')}`;
+          })
+          .filter((line): line is string => line !== undefined),
+      [...IDENTIFYING],
+    );
+
+    return found.slice(0, VALUE_NODE_LIMIT).join('\n');
+  } catch {
+    // An observation is never the thing that fails a run: a page mid-navigation
+    // can tear the evaluation down, and the tree is still worth having.
+    return '';
+  }
+}
+
 /** The engine's own view of a step that did not work out. */
 interface StepFailure {
   readonly expected: string;
@@ -203,6 +263,14 @@ export interface Execution {
   result(): unknown;
   /** Write an entry into this run's record. */
   record(body: EntryBody, stepId?: string): Entry;
+  /**
+   * Write an entry and hang the screen off it.
+   *
+   * The capture path, reached from outside the step cycle: generation provokes
+   * outcomes in its own runs, and the moment an outcome is reached but not
+   * detected happens there rather than inside a step.
+   */
+  evidence(body: EntryBody, trigger: AttachmentTrigger, stepId?: string): Promise<Entry>;
   finishedWith(status: TerminalStatus): void;
   /** Record an error that is not already a verdict, and leave it thrown. */
   failedWith(error: unknown): Promise<void>;
@@ -229,6 +297,18 @@ export interface Observation {
   readonly title: string;
   /** Playwright's ARIA snapshot: roles, names and structure, as YAML. */
   readonly tree: string;
+  /**
+   * What identifies the page's value-bearing nodes, one per line.
+   *
+   * The tree is a screen reader's view, and the elements that hold *values* —
+   * `input`, `td`, `dd`, anything carrying a test id — have no role and no
+   * accessible name in it. So a model asked to extract one is shown the value
+   * and nothing to name it by, and the only target left is a positional path,
+   * which targeting excludes outright. This is the same set the evidence rules
+   * call value-bearing, reported through the same attributes a structural DOM
+   * snapshot keeps: names, never values.
+   */
+  readonly values: string;
 }
 
 export interface ExecutionOptions extends RunOptions {
@@ -464,6 +544,9 @@ export async function openExecution<I extends FieldSet, A>(
     }
   });
 
+  /** Whether this run has already declared how it ended. */
+  let finished = false;
+
   const extracted: Record<string, unknown> = {};
   /**
    * What `.pauseForInput()` has obtained so far, passed to every accessor as
@@ -494,6 +577,7 @@ export async function openExecution<I extends FieldSet, A>(
       url: page.url(),
       title: await page.title(),
       tree: await page.locator('body').ariaSnapshot(),
+      values: await valueNodes(page),
     }),
     screenshot: async (): Promise<Buffer | undefined> =>
       policy.screenshot === 'none'
@@ -513,21 +597,43 @@ export async function openExecution<I extends FieldSet, A>(
       }
       return (map as (values: Record<string, unknown>) => unknown)(extracted);
     },
+    evidence: async (
+      body: EntryBody,
+      trigger: AttachmentTrigger,
+      stepId?: string,
+    ): Promise<Entry> => await recordWithCapture(body, stepId, trigger, page),
     finishedWith: (status: TerminalStatus): void => {
+      // A run finishes once. Two terminal entries is not extra detail, it is a
+      // record that contradicts itself, and a reader has no way to tell which
+      // of them was meant.
+      if (finished) {
+        return;
+      }
+      finished = true;
       record({ kind: 'run.finished', status });
     },
     failedWith: async (error: unknown): Promise<void> => {
       // A `ReplayError` is already a verdict and has already written its own
       // entry; anything else reached here without being classified at all.
       if (!(error instanceof ReplayError) && !(error instanceof Terminated)) {
-        record({
-          kind: 'error',
-          category: 'hard-failure',
-          expected: 'the flow to run to completion',
-          observed: error instanceof Error ? error.message : String(error),
-        });
+        // Through the capture path, for the same reason `hardFailure` uses it:
+        // an unclassified failure is still a hard failure, and it is the one a
+        // reader has least other evidence about — replay is headless, so the
+        // attachment is the only account of the screen there will ever be.
+        // Routing around it also dropped `attachmentsSkipped`, which left the
+        // record unable to say whether capture was unconfigured or forgotten.
+        await recordWithCapture(
+          {
+            kind: 'error',
+            category: 'hard-failure',
+            expected: 'the flow to run to completion',
+            observed: error instanceof Error ? error.message : String(error),
+          },
+          undefined,
+          'hard-failure',
+          page,
+        );
       }
-      await Promise.resolve();
     },
     close,
   };
@@ -697,10 +803,19 @@ export async function openExecution<I extends FieldSet, A>(
     try {
       switch (step.kind) {
         case 'fillForm': {
-          const raw = (step.value as (value: Infer<I>, got: Record<string, Secret>) => FillValue)(
-            input,
-            obtained,
-          );
+          // Read back wider than the flow declares, on purpose: the
+          // declaration promises a value and the runtime cannot. Discovery
+          // fills the input map as the model asks for values, and a JavaScript
+          // caller is unchecked — so an absent value is a real state that the
+          // types, read literally, would have the engine walk straight into.
+          const accessor = step.value as (
+            value: Infer<I>,
+            got: Record<string, Secret>,
+          ) => FillValue | null | undefined;
+          const raw = accessor(input, obtained);
+          if (raw === undefined || raw === null) {
+            throw await missingInput(step.id, accessor);
+          }
           // A secret reaches the page only through an explicit `.reveal()`,
           // and this is the one place in the codebase that call is made.
           const value = typeof raw === 'string' ? raw : raw.reveal();
@@ -758,9 +873,15 @@ export async function openExecution<I extends FieldSet, A>(
           break;
 
         case 'choose': {
-          const value = (
-            step.value as unknown as (value: Infer<I>, got: Record<string, Secret>) => string
-          )(input, obtained);
+          // Wider than the declaration, for the reason given under `fillForm`.
+          const accessor = step.value as unknown as (
+            value: Infer<I>,
+            got: Record<string, Secret>,
+          ) => string | null | undefined;
+          const value = accessor(input, obtained);
+          if (value === undefined || value === null) {
+            throw await missingInput(step.id, accessor);
+          }
           await resolution.locator.selectOption(value, { timeout: timeoutMs });
           break;
         }
@@ -904,8 +1025,6 @@ export async function openExecution<I extends FieldSet, A>(
       },
       stepId,
     );
-    record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
-
     throw new NavigationBlocked(`${stepId}: navigation resolved outside the allowlist`, {
       runId,
       step: stepId,
@@ -1163,8 +1282,32 @@ export async function openExecution<I extends FieldSet, A>(
       'hard-failure',
       page,
     );
-    record({ kind: 'run.finished', status: { ending: 'failure', category: 'hard-failure' } });
     return new Class(message, { runId, step: stepId, expected, observed });
+  }
+
+  /**
+   * A step reached a declared input that holds no value.
+   *
+   * Raised rather than folded into a step failure, because retrying cannot
+   * supply what was never given — the run would spend the ladder re-reading an
+   * empty field. Named where the accessor can say what it reads: `field()`
+   * carries its source, so the message is the missing *input* rather than the
+   * target that was going to receive it, which is the difference between a
+   * message a model can act on and one it can only repeat.
+   */
+  async function missingInput(stepId: string, accessor: object): Promise<ReplayError> {
+    const named =
+      describes(accessor) && accessor.source.from === 'input' ? accessor.source.name : undefined;
+    const expected =
+      named === undefined ? 'a value from the input' : `a value for input "${named}"`;
+
+    return hardFailure(
+      InputMissing,
+      stepId,
+      `${stepId}: ${expected} was never supplied`,
+      expected,
+      'nothing was supplied for it',
+    );
   }
 
   /**
@@ -1248,7 +1391,12 @@ export function runFlow<I extends FieldSet, A>(
       open.finishedWith({ ending: 'success' });
       return answer as A;
     } catch (error) {
+      // Replay ends here, so replay is where the verdict is written. Discovery
+      // and provocation drive the step cycle themselves and write their own,
+      // which is the whole reason a failing *step* must not write one: there,
+      // the step failing is not the run ending.
       await open.failedWith(error);
+      open.finishedWith({ ending: 'failure', category: 'hard-failure' });
       throw error;
     } finally {
       await open.close();

@@ -1,5 +1,10 @@
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { startAll, type FixtureBundle } from '@interfacer/fixtures';
 import {
+  DEFAULT_EFFECTS,
   fields,
   Flow,
   makeSecret,
@@ -11,7 +16,14 @@ import {
   type Usage,
 } from '@interfacer/dsl';
 import { chromium, type Browser } from 'playwright';
-import { discover, TOOLS, type Decide, type DiscoveryState, type Turn } from 'interfacer';
+import {
+  discover,
+  TOOLS,
+  type Decide,
+  type DiscoveryState,
+  type Question,
+  type Turn,
+} from 'interfacer';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
@@ -162,6 +174,41 @@ describe('a question the model asks', () => {
     expect(flow.steps).toHaveLength(0);
   });
 
+  it('is put as a credential question where it asks for a secret, and the answer goes no further', async () => {
+    // Two halves of the same rule: a live value for a `secret()` input is a
+    // real credential. The channel is told, so a reader that echoes does not
+    // put it on the screen; and the tool result carries only the binding, so it
+    // does not go to the provider and sit in the transcript every turn after.
+    // The model never needs it — it fills the field by naming the input, and
+    // the engine is the only thing that reveals a secret.
+    const flow = capability();
+    const { decide, seen } = script(
+      turn({ name: 'ask', input: { question: 'and the password?', for: 'password' } }),
+      turn({ name: 'snapshot', input: {} }),
+    );
+
+    const asked: Question[] = [];
+    await discover(flow, {
+      ...QUIET,
+      task: 'sign in',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 2,
+      ask: (question) => {
+        asked.push(question);
+        return Promise.resolve('s3cret-teller');
+      },
+    });
+
+    expect(asked[0]?.secret).toBe(true);
+
+    const results = seen[1]?.transcript.find((exchange) => exchange.kind === 'results');
+    const detail = results?.kind === 'results' ? (results.results[0]?.detail ?? '') : '';
+    expect(detail).toBe('bound to password');
+    expect(JSON.stringify(seen[1])).not.toContain('s3cret-teller');
+  });
+
   it('says so when there is nobody in the session', async () => {
     const flow = capability();
     const { decide, seen } = script(
@@ -182,6 +229,182 @@ describe('a question the model asks', () => {
     expect(results?.kind === 'results' && results.results[0]?.detail).toContain(
       'there is nobody to ask',
     );
+  });
+});
+
+describe('a step that reads an input nobody has supplied yet', () => {
+  it('tells the model which input it is and to ask for it, and the run goes on', async () => {
+    // The live-value map starts empty and fills as the model asks, so this is
+    // an ordinary state rather than a caller's mistake — and in a live session
+    // the model went straight to `fillForm`, got back `Cannot read properties
+    // of undefined (reading 'reveal')`, tried the next field, and stalled with
+    // a one-step flow. A tool result naming neither the input nor the remedy is
+    // not information the model can act on.
+    const flow = capability();
+    const { decide, seen } = script(
+      turn({ name: 'open', input: { url: { from: 'input', name: 'url' } } }),
+      turn({
+        name: 'fillForm',
+        input: { target: USERNAME, value: { from: 'input', name: 'username' } },
+      }),
+    );
+
+    const found = await discover(flow, {
+      ...QUIET,
+      task: 'sign in',
+      // Only the entry point is known: the rest is what the model has to ask for.
+      input: { url: bundle.fixtures.clean.url } as Infer<typeof inputFields>,
+      decide,
+      browser,
+      maxTurns: 3,
+      retries: 0,
+    });
+
+    const results = seen
+      .at(-1)
+      ?.transcript.filter((exchange) => exchange.kind === 'results')
+      .at(-1);
+    const detail = results?.kind === 'results' ? (results.results[0]?.detail ?? '') : '';
+
+    expect(detail).toContain('input "username"');
+    expect(detail).toContain('ask');
+    // Nothing was appended, and the run is still going: a step that fails is
+    // information, not an ending.
+    expect(flow.steps.map((step) => step.kind)).toEqual(['open']);
+    expect(found.ending).toBe('turn-limit');
+  });
+});
+
+describe('a discovery run told where to put its evidence', () => {
+  it('writes the attachments a hard failure triggers, masked by what the contract declared', async () => {
+    // A discovery run is the one that cannot be repeated cheaply, and until the
+    // CLI took `--attachments` there was no way to keep a picture of what the
+    // model was looking at when a step failed — the record said only that it
+    // had skipped. The triggers are the engine's own three; this exercises the
+    // one a discovery run meets most.
+    const dir = mkdtempSync(join(tmpdir(), 'interfacer-evidence-'));
+    // What the capability observes decides what may be kept: at PII the
+    // screenshot is masked and the DOM is stripped of values, at capture time.
+    const flow = new Flow({
+      id: 'checkAccountBalance',
+      input: inputFields,
+      effects: { ...DEFAULT_EFFECTS, dataClasses: ['PII'] },
+    });
+    const { decide } = script(
+      turn({ name: 'open', input: { url: { from: 'input', name: 'url' } } }),
+      turn({ name: 'checkpoint', input: { target: [{ by: 'text', text: 'not on this page' }] } }),
+    );
+
+    await discover(flow, {
+      ...QUIET,
+      task: 'sign in',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 3,
+      retries: 0,
+      attachmentDir: dir,
+    });
+
+    // One directory per run, and a file per trigger within it, so a directory
+    // pointed at twice does not interleave two runs' evidence.
+    const runs = readdirSync(dir);
+    expect(runs).toHaveLength(1);
+
+    const inRun = join(dir, runs[0] ?? '');
+    const written = readdirSync(inRun);
+
+    expect(written.some((name) => name.endsWith('.png'))).toBe(true);
+    expect(written.some((name) => name.endsWith('.html'))).toBe(true);
+    expect(written.every((name) => name.includes('hard-failure'))).toBe(true);
+
+    // Structure-only, which the design draws precisely: the attributes that
+    // *name* a control are kept and every text node and value-bearing attribute
+    // is dropped. So the field is still identifiable — and what was typed into
+    // it is not there to be identified.
+    const dom = readFileSync(
+      join(inRun, written.find((name) => name.endsWith('.html')) ?? ''),
+      'utf8',
+    );
+    expect(dom).toContain('data-testid="username"');
+    expect(dom).toContain('for="username"');
+    expect(dom).not.toContain('teller1');
+    expect(dom).not.toContain('s3cret-teller');
+  });
+});
+
+// @covers target.preference-order
+describe('a target that describes where a control sits rather than what it is', () => {
+  it('is refused, and the model is told to name the element instead', async () => {
+    // The design excludes positional paths and generated class names outright:
+    // they encode incidental structure and break on any re-render. Nothing
+    // enforced it, and a live run recorded `dl dd:nth-of-type(1..4)` for four
+    // extracts on the *clean* fixture — a capability that silently reads the
+    // wrong field the day a row is added above.
+    const flow = capability();
+    const { decide, seen } = script(
+      ...signIn(),
+      ...lookUp(),
+      turn({
+        name: 'extract',
+        input: {
+          name: 'balance',
+          target: [{ by: 'css', selector: 'dl dd:nth-of-type(4)' }],
+          parse: 'money',
+        },
+      }),
+    );
+
+    await discover(flow, {
+      ...QUIET,
+      task: 'read a balance',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 8,
+      retries: 0,
+    });
+
+    const results = seen
+      .at(-1)
+      ?.transcript.filter((exchange) => exchange.kind === 'results')
+      .at(-1);
+    const detail = results?.kind === 'results' ? (results.results[0]?.detail ?? '') : '';
+
+    expect(detail).toContain('positional');
+    // Nothing was appended: a refused target must not reach the artifact, and
+    // the extract is not among the recorded steps.
+    expect(flow.steps.map((step) => step.kind)).not.toContain('extract');
+  });
+
+  it('is accepted where the page gives the element a name to be found by', async () => {
+    // The guard: the rule is about incidental structure, not about css. The
+    // same value, targeted by the test id the page carries, is recorded.
+    const flow = capability();
+    const { decide } = script(
+      ...signIn(),
+      ...lookUp(),
+      turn({
+        name: 'extract',
+        input: {
+          name: 'balance',
+          target: [{ by: 'css', selector: '[data-testid="balance"]' }],
+          parse: 'money',
+        },
+      }),
+    );
+
+    await discover(flow, {
+      ...QUIET,
+      task: 'read a balance',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 8,
+      retries: 0,
+    });
+
+    expect(flow.steps.map((step) => step.kind)).toContain('extract');
   });
 });
 
@@ -272,7 +495,7 @@ describe('what a tool call does', () => {
   });
 });
 
-// @covers agent.sees-the-accessibility-tree agent.screenshot-is-never-a-target
+// @covers agent.sees-the-accessibility-tree agent.screenshot-is-never-a-target agent.value-nodes-are-identified
 describe('what the model is given', () => {
   it('is the accessibility tree, in the vocabulary targets are written in', async () => {
     const flow = capability();
@@ -297,6 +520,32 @@ describe('what the model is given', () => {
     expect(tree).toMatch(/button "Sign in"/);
     expect(tree).toMatch(/textbox "Username"/);
     expect(tree).not.toMatch(/<div/);
+  });
+
+  it('names what identifies a value-bearing node, which the tree cannot', async () => {
+    // The tree is a screen reader's view, and a value node — a `dd`, a `td`, an
+    // `input` — has no role and no accessible name to be found by. So the tree
+    // shows the balance and nothing to target it with, and a model asked to
+    // extract it has only a positional path left, which targeting excludes. The
+    // page does carry a stable name for it; this is what puts that in front of
+    // the model, as attribute *names* rather than values.
+    const flow = capability();
+    const { decide, seen } = script(...signIn(), ...lookUp());
+
+    await discover(flow, {
+      ...QUIET,
+      task: 'read a balance',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 7,
+    });
+
+    const observation = seen.at(-1)?.observation;
+
+    expect(observation?.values ?? '').toContain('data-testid="balance"');
+    // The half that explains why it is needed at all.
+    expect(observation?.tree ?? '').not.toContain('data-testid');
   });
 
   it('gives a screenshot as a second observation that appends nothing', async () => {
@@ -708,5 +957,184 @@ describe('the run record a discovery writes', () => {
     expect(turnEntry?.kind === 'model.turn' && turnEntry.usage.cacheReadInputTokens).toBe(9_000);
     // The step that turn produced is in the same record, under the same run.
     expect(entries.some((entry) => entry.kind === 'step.finished')).toBe(true);
+  });
+});
+
+// @covers agent.turn-without-a-call-recovers
+describe('a turn that calls no tool', () => {
+  it('does not derail the session it lands in the middle of', async () => {
+    // The failure this guards: the loop had nothing to report for such a turn,
+    // so it rendered an empty user message — which the provider rejects, and
+    // which poisons every request built from the transcript afterwards. The run
+    // died several turns later, at a message index nothing in the record
+    // explained. Here the empty turn sits in the middle of a working script.
+    const flow = capability();
+    const { decide } = script(
+      ...signIn(),
+      turn(),
+      ...lookUp(),
+      turn({ name: 'extract', input: { name: 'balance', target: BALANCE, parse: 'money' } }),
+      turn({ name: 'returns', input: { status: 'ok', values: { balance: 'balance' } } }),
+    );
+
+    const discovered = await discover(flow, {
+      ...QUIET,
+      task: 'read the balance of an account',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 12,
+    });
+
+    expect(discovered.ending).toBe('returned');
+  });
+
+  it('is told what it failed to do, rather than being asked the same thing again', async () => {
+    // Skipping the exchange would leave the next request byte-identical to the
+    // one that produced nothing, so the model would produce it again and the
+    // run would stall. What it gets back has to differ from what it last saw.
+    const flow = capability();
+    const { decide, seen } = script(turn(), turn({ name: 'snapshot', input: {} }));
+
+    await discover(flow, {
+      ...QUIET,
+      task: 'read the balance of an account',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 3,
+    });
+
+    const after = seen.at(-1)?.transcript ?? [];
+    const said = after.filter((exchange) => exchange.kind === 'nudge');
+    expect(said).toHaveLength(1);
+    expect(said[0]?.kind === 'nudge' ? said[0].text : '').toContain('called no tool');
+  });
+
+  it('is still bounded when the model never calls anything at all', async () => {
+    // Recovery must not become an unbounded conversation with a model that has
+    // nothing to say: the stall guard still ends it.
+    const flow = capability();
+    const { decide } = script(turn(), turn(), turn(), turn(), turn(), turn());
+
+    const discovered = await discover(flow, {
+      ...QUIET,
+      task: 'read the balance of an account',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 20,
+    });
+
+    expect(discovered.ending).toBe('stalled');
+    expect(discovered.turns).toBeLessThan(20);
+  });
+});
+
+// @covers agent.refusal-is-named
+describe('a provider refusal', () => {
+  /** What a refusal looks like at the seam: no content at all, and a reason. */
+  function refused(category = 'cyber'): Turn {
+    return { text: '', usage: USAGE, calls: [], refusal: { category } };
+  }
+
+  it('is recorded as a refusal rather than as an ordinary empty turn', async () => {
+    const flow = capability();
+    const entries: Entry[] = [];
+    const { decide } = script(refused(), turn({ name: 'snapshot', input: {} }));
+
+    await discover(flow, {
+      ...QUIET,
+      record: (entry) => entries.push(entry),
+      task: 'read the balance of an account',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 3,
+    });
+
+    // Without this the turn is invisible or, worse, indistinguishable from the
+    // model simply choosing to call nothing.
+    const named = entries.filter(
+      (entry) => entry.kind === 'model.turn' && entry.reason.startsWith('refused'),
+    );
+    expect(named).toHaveLength(1);
+    expect(named[0]?.kind === 'model.turn' ? named[0].reason : '').toContain('cyber');
+  });
+
+  it('is answered and carried past, because it is one request and not the session', async () => {
+    const flow = capability();
+    const { decide } = script(
+      refused(),
+      ...signIn(),
+      ...lookUp(),
+      turn({ name: 'extract', input: { name: 'balance', target: BALANCE, parse: 'money' } }),
+      turn({ name: 'returns', input: { status: 'ok', values: { balance: 'balance' } } }),
+    );
+
+    const discovered = await discover(flow, {
+      ...QUIET,
+      task: 'read the balance of an account',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 12,
+    });
+
+    expect(discovered.ending).toBe('returned');
+  });
+
+  it('ends the run as refused, not as a stall, when it does not let up', async () => {
+    // A stall is the model going in circles on a page; a refusal is the request
+    // never being answered. Reporting the second as the first sends whoever
+    // reads the record looking at the wrong thing.
+    const flow = capability();
+    const { decide } = script(refused(), refused(), refused(), refused(), refused());
+
+    const discovered = await discover(flow, {
+      ...QUIET,
+      task: 'read the balance of an account',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 20,
+    });
+
+    expect(discovered.ending).toBe('refused');
+  });
+});
+
+describe('the terminal entry a run writes', () => {
+  it('is written once, even when a step hard-failed and the run carried on', async () => {
+    // A hard failure inside discovery is information, not the end: the step is
+    // retracted and the model tries something else. But the failure site wrote
+    // `run.finished` itself, so the record ended up claiming the run finished
+    // twice, with contradictory verdicts — a live run recorded
+    // `failure/hard-failure` and then `success` one second apart.
+    const flow = capability();
+    const entries: Entry[] = [];
+    const { decide } = script(
+      turn({ name: 'open', input: { url: { from: 'input', name: 'url' } } }),
+      // Nothing on the page answers to this, so the step fails and is retracted.
+      turn({
+        name: 'pressButton',
+        input: { target: [{ by: 'role', role: 'button', name: 'No Such Control' }] },
+      }),
+      turn({ name: 'snapshot', input: {} }),
+    );
+
+    await discover(flow, {
+      ...QUIET,
+      record: (entry) => entries.push(entry),
+      task: 'read the balance of an account',
+      input: liveValues(),
+      decide,
+      browser,
+      maxTurns: 4,
+    });
+
+    expect(entries.filter((entry) => entry.kind === 'run.finished')).toHaveLength(1);
+    // And the failure itself is still on the record, as an error.
+    expect(entries.some((entry) => entry.kind === 'error')).toBe(true);
   });
 });

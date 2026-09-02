@@ -67,6 +67,17 @@ claims, which would otherwise be reported as covered by tests the gate never ran
   predetermined tool calls, and nothing asserts how it was called. It adds about six
   seconds to the gate, against `integration`'s sixty-five.
 
+  It also holds what the loop refuses and what it offers instead: a target that
+  counts to an element (`dl dd:nth-of-type(4)`) or leans on a generated class is
+  refused when the model proposes it, while the same value targeted by the test id
+  the page carries is recorded; a step reading an input nobody has supplied yet
+  reports which input and that it should be asked for; and a live value for a
+  `secret()` input is put as a credential question and never echoed back to the
+  model. The keyboard those questions are answered through has its own unit tests,
+  against a pair of ordinary streams: a credential is not echoed, an ordinary
+  answer still is, and a session that ends releases the input rather than holding a
+  pipe nobody will close.
+
   It is also the tier that reads the **observation format** against more than one
   app. The design gives three reasons for showing the model an accessibility tree,
   and each needs a different fixture to see: `clean` shows the first — a tree that
@@ -76,7 +87,10 @@ claims, which would otherwise be reported as covered by tests the gate never ran
   whole thing is a third the size of the markup behind it. `hostile` shows what a
   picture could not — its sign-in button reads `Sign in` and is announced as
   `Submit credentials`, so the tree is the only observation in which the name that
-  resolves is visible at all.
+  resolves is visible at all. What no tree shows is a way to *target* a value: a
+  `dd` or a `td` has no role and no accessible name, which is why the observation
+  carries the identifying attributes of those nodes beside it, and why `clean` is
+  only clean for the controls.
 - **`e2e`** — real browser, real fixture, live model. The through-line: discovery
   reaches the goal, emits a project that compiles, and that project replays with
   no model attached. Slow, non-deterministic, and it costs money. **Deliberately
@@ -96,7 +110,7 @@ none of which exist without a server.
 
 | fixture     | shape                                                             | exercises                                                     |
 | ----------- | ----------------------------------------------------------------- | ------------------------------------------------------------- |
-| `clean`     | semantic markup, roles, labels, test IDs                          | `byRole` wins throughout; the preferred strategies really are  |
+| `clean`     | semantic markup, roles, labels, test IDs                          | `byRole` wins for controls; values resolve by test id, not role |
 | `legacy`    | server-rendered, table layout, no test IDs, no `<label>`          | the chain falling through to `text` and `css`                  |
 | `hostile`   | nested tables, generated classes, mismatched names, duplicate labels | ambiguity handling, and the honest floor                    |
 | `rebranded` | `clean` restyled and reworded, same structure                     | the multi-tenant claim: the same flow replays unchanged        |
@@ -360,7 +374,10 @@ from its own `package.json`, including the `tsc` that compiles it.
 
 The cost is that this one test does a real install: `typescript`, `@types/node` and
 Playwright, so it needs the network, and the first run pays for the download. It is
-also why nothing needs to be ignored — no generated file ever lands in the repo.
+also why the suite needs nothing ignored — no test writes a generated file into the
+repo. The one ignored path, `scratch/` at the root, is for the other case: a *manual*
+run pointed at `--root scratch`, so a person can read what Interfacer just wrote
+without it becoming a diff.
 
 **Fixture servers are started per test file, on ephemeral ports**, in a `beforeAll`
 and closed in an `afterAll`. Not a `globalSetup`: files run in parallel workers, and
@@ -479,6 +496,16 @@ The runner config is the tier/location mapping and timeouts. These are real
 decisions that nothing has made yet, listed here so they are not mistaken for
 settled:
 
+- **Whether steering is enough to keep exploration out of the artifact** —
+  discovery takes the shortest path to the goal because the brief tells it to,
+  and each outcome is provoked in a dedicated run afterwards. That is model
+  compliance rather than a guarantee: a run that detours to look at an outcome
+  still records the detour, and every recorded step is replayed for the life of
+  the capability — a live run recorded a lookup of a nonexistent account, its
+  error page, and a click back to search, permanently. The reliable alternative
+  is letting the model retract a step the application accepted, which costs the
+  property that everything in the artifact is something that actually happened.
+  Left until a run shows the steering failing. *(Phase 8, if then)*
 - **Frame traversal** — `hostile` serves a help panel inside an `<iframe>`, and
   the design says nothing about whether the engine resolves a target across a
   document boundary. The frame is deliberately off the critical path, so every

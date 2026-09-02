@@ -59,13 +59,25 @@ export type AllowlistDecision =
  * authored data — a malformed entry is a defect in the artifact, not a condition
  * encountered at run time.
  */
-function assertUsablePattern(pattern: HostPattern): void {
+/**
+ * Reject a pattern that could never do what it looks like it does.
+ *
+ * Exported so a pattern can be refused where it is *authored* — in the
+ * interview — rather than only at the first navigation it fails to admit.
+ */
+export function assertUsablePattern(pattern: HostPattern): void {
   const body = pattern.startsWith('*.') ? pattern.slice(2) : pattern;
 
-  if (body.length === 0 || body.includes('*')) {
+  // A port, a scheme or a path makes a pattern that can never match: matching
+  // is against `URL.hostname`, which carries none of them. Left accepted, such
+  // a pattern admits nothing while reading as though it admits a host — the
+  // worst of both, since the failure surfaces as a blocked navigation against a
+  // host the contract plainly names.
+  if (body.length === 0 || body.includes('*') || /[:/]/u.test(body)) {
     throw new TypeError(
       `unusable allowlist pattern ${JSON.stringify(pattern)}: ` +
-        'a pattern is a host, optionally prefixed with a single "*." for its subdomains',
+        'a pattern is a host, optionally prefixed with a single "*." for its subdomains — ' +
+        'no scheme, no port and no path',
     );
   }
 }

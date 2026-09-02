@@ -9,7 +9,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   DEFAULT_EFFECTS,
   makeSecret,
+  fields,
+  Flow,
   runFlow,
+  text,
   type AttachmentRef,
   type DataClass,
   type Effects,
@@ -312,6 +315,37 @@ describe('attachments happen on triggers and nowhere else', () => {
       'commit',
       'control-transfer',
     ]);
+  });
+
+  it('captures at a hard failure the step cycle never classified', async () => {
+    // The `ACC-9999` case above is a `ReplayError`: the step cycle classified
+    // it, so it goes out through `hardFailure` and is evidenced. An error the
+    // cycle never classified — a result mapper that throws, a browser that
+    // dies, an OOM — reaches `failedWith` instead, and that is the path where
+    // evidence matters most: replay is headless, so the attachment is the only
+    // account of the screen that will ever exist.
+    const captured = capture();
+
+    const broken = new Flow({ id: 'brokenResult', input: fields({ url: text() }) })
+      .open((i) => i.url, { id: 'open' })
+      .returns(() => {
+        throw new Error('the result mapper threw');
+      });
+
+    await runFlow(
+      broken,
+      { url: bundle.fixtures.clean.url },
+      {
+        ...RUN,
+        browser,
+        record: captured.record,
+        attachmentDir: captured.dir,
+      },
+    ).catch(() => undefined);
+
+    const failure = captured.entries.find((entry) => entry.kind === 'error');
+    expect(failure?.category).toBe('hard-failure');
+    expect(failure?.attachments?.map((a) => a.kind).sort()).toEqual(['dom', 'screenshot']);
   });
 
   it('says so when there is nowhere to put them', async () => {

@@ -6,6 +6,7 @@ import {
   byText,
   css,
   describeTarget,
+  incidentalSelector,
   isBestFirst,
   namesOf,
   strategyRank,
@@ -31,6 +32,49 @@ describe('Target', () => {
 
   it('freezes targets, so a recorded flow cannot be edited in place', () => {
     expect(Object.isFrozen(byRole('button', 'Sign in'))).toBe(true);
+  });
+});
+
+// @covers target.preference-order
+describe('the selectors the design excludes outright', () => {
+  it.each([
+    ['dl dd:nth-of-type(1)', 'positional'],
+    ['main > div:nth-child(3) span', 'positional'],
+    ['tr:first-child td', 'positional'],
+    ['ul li:last-of-type', 'positional'],
+    // The generated class names `hostile` actually serves. A hash in a class is
+    // a build artifact: it survives nothing, not even a rebuild of the same
+    // source.
+    ['.css-4b8a1e', 'generated'],
+    ['.css-1x2y3z button', 'generated'],
+    ['._q3Wm1', 'generated'],
+    ['div._a7Bq9x > span', 'generated'],
+  ])('rejects %s as %s', (selector, why) => {
+    expect(incidentalSelector(selector)).toContain(why);
+  });
+
+  it.each([
+    '#balance-value',
+    '[data-testid="balance"]',
+    'button[type="submit"]',
+    'input[name="username"]',
+    '.error-banner',
+    '.col-md-6',
+    'main dd',
+  ])('admits %s, which names something rather than counting to it', (selector) => {
+    expect(incidentalSelector(selector)).toBeUndefined();
+  });
+
+  it('is a judgement about the selector, not a restriction on css()', () => {
+    // `css()` keeps taking anything: a hand-written flow may need a positional
+    // path as a genuine last resort, and the design's floor is that on a page
+    // with no semantic markup css is all there is. What this decides is what
+    // *discovery* is allowed to record, where a model has the whole page to
+    // choose from and a weak target would be a choice rather than a floor.
+    expect(css('dl dd:nth-of-type(1)')).toEqual({
+      by: 'css',
+      selector: 'dl dd:nth-of-type(1)',
+    });
   });
 });
 

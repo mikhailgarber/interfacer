@@ -13,6 +13,7 @@
  * copy free to drift from it.
  */
 import {
+  answerStatus,
   interactionsOf,
   isAttended,
   requiresApproval,
@@ -342,7 +343,17 @@ function docs(request: GenerateRequest): string {
     ([name, field]) => `| \`${name}\` | ${field.kind} | ${field.description ?? ''} |`,
   );
 
-  const answers = [...flow.outcomes.map((outcome) => outcome.id)];
+  // The statuses a caller switches on, not the step ids: an outcome's id is
+  // derived from its target unless one was given, so documenting ids documents
+  // something no `switch` will ever match. The success arm is an answer too,
+  // and the one every caller handles.
+  const answers = [
+    ...(answerStatus(flow.result) === undefined ? [] : [answerStatus(flow.result) ?? '']),
+    ...flow.outcomes.flatMap((outcome) => {
+      const status = answerStatus(outcome.map);
+      return status === undefined ? [] : [status];
+    }),
+  ];
 
   const interactions = Object.values(interactionsOf(flow));
 

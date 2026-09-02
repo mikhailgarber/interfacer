@@ -16,7 +16,13 @@
 import { addUsage, ratesFor, spendCost, ZERO_SPEND, type Spend } from '@interfacer/dsl';
 
 import { accepted, type Ask } from '../ask.js';
-import { DEFAULT_MODEL, type Converse, type Exchange, type ToolResult } from '../agent/decide.js';
+import {
+  DEFAULT_MODEL,
+  NO_CALL,
+  type Converse,
+  type Exchange,
+  type ToolResult,
+} from '../agent/decide.js';
 import { ToolArgumentError } from '../agent/tools.js';
 import { applyAnswers, type Authorization } from './answers.js';
 import { gaps, settle, type Contract, type ContractDraft, type Gap } from './contract.js';
@@ -135,7 +141,23 @@ export async function interview(options: InterviewOptions): Promise<InterviewRes
 
     turns += 1;
     spend = addUsage(spend, turn.usage);
-    transcript.push({ kind: 'called', text: turn.text, calls: turn.calls });
+    transcript.push({
+      kind: 'called',
+      text: turn.text,
+      calls: turn.calls,
+      ...(turn.reasoning === undefined ? {} : { reasoning: turn.reasoning }),
+    });
+
+    if (turn.calls.length === 0) {
+      // Same hazard as discovery's loop, and the interview is if anything more
+      // exposed: a refusal comes back as an assistant message with no content,
+      // and there is no tool call to answer, so the only alternative to saying
+      // something here is an empty user message the provider rejects. The stall
+      // guard still bounds it.
+      transcript.push({ kind: 'nudge', text: NO_CALL });
+      quiet += 1;
+      continue;
+    }
 
     const results: ToolResult[] = [];
     let moved = false;

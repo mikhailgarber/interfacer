@@ -11,6 +11,7 @@
  * `securityEffect` are Interfacer's own proposals, and a proposal a model could
  * record for itself is a constraint the model authored.
  */
+import { assertUsablePattern } from '@interfacer/dsl';
 import type { DataClass, FieldKind, Financial, PauseKind, Scope } from '@interfacer/dsl';
 
 import type { ToolCall, ToolDefinition } from '../agent/decide.js';
@@ -341,7 +342,19 @@ export function patchOf(call: ToolCall): AnswerPatch {
     patch.effects = effectsOf(input.effects);
   }
   if (input.allowlist !== undefined) {
-    patch.allowlist = stringList(input.allowlist, 'allowlist');
+    const hosts = stringList(input.allowlist, 'allowlist');
+    // Refused where it is authored rather than at the first navigation it fails
+    // to admit: a pattern carrying a port, a scheme or a path matches nothing,
+    // and a contract naming a host it cannot actually reach is worse than one
+    // that names none.
+    for (const host of hosts) {
+      try {
+        assertUsablePattern(host);
+      } catch (error) {
+        throw new ToolArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    }
+    patch.allowlist = hosts;
   }
   if (input.budgetUsd !== undefined) {
     if (typeof input.budgetUsd !== 'number' || !Number.isFinite(input.budgetUsd)) {

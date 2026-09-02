@@ -19,6 +19,17 @@ export interface Question {
   /** `confirm` puts a proposal for acceptance; `open` asks in the open. */
   readonly kind: 'open' | 'confirm';
   readonly text: string;
+  /**
+   * The answer is a credential, so a channel that echoes must not echo it.
+   *
+   * Set where the question asks for the value of a `secret()` input — which
+   * Interfacer knows and the model does not, since it names the input in `for`
+   * and the loop is what resolves that to a declaration. A live value for a
+   * secret is a real credential, and the redaction that applies to it at replay
+   * applies while it is being typed: the run record already keeps it out, and
+   * this keeps it off the screen.
+   */
+  readonly secret?: boolean;
 }
 
 export type Ask = (question: Question) => Promise<string>;

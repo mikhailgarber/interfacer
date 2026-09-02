@@ -110,6 +110,22 @@ export class EffectsRefused extends ReplayError {}
 export class InteractionFailed extends ReplayError {}
 
 /**
+ * A step read a declared input that holds no value.
+ *
+ * Its own class for the reason `EffectsRefused` is: the application is fine and
+ * retrying changes nothing — the run was started without something it needs.
+ * The compiler rules this out for a typed caller, so the two ways here are a
+ * JavaScript caller and discovery, where the input map is filled as the model
+ * asks for values and a step can genuinely reach a field before one arrives.
+ *
+ * It exists because the alternative was a `TypeError` from inside the engine,
+ * which named nothing a caller could act on and which the agent loop could only
+ * relay verbatim — leaving the model to retry the same call until the stall
+ * guard ended the run.
+ */
+export class InputMissing extends ReplayError {}
+
+/**
  * `resume` was called with an id that names no parked run.
  *
  * Not a {@link ReplayError}: there is no run to attribute it to. It is either a

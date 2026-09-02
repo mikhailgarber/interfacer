@@ -73,6 +73,7 @@ export {
 export { applyAnswers, cited, type Applied, type Authorization } from './interview/answers.js';
 
 export { accepted, type Ask, type Question } from './ask.js';
+export { keyboard, type Keyboard } from './keyboard.js';
 
 export {
   interview,
