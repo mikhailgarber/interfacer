@@ -325,8 +325,9 @@ To use devcontainer without VSC, prefix a command with `./dev.sh`, for example
 it is absent, starts or reuses the container configured in `.devcontainer/`, and runs
 the command in the repository workspace.
 
-`npm run verify` is the gate. There is no CI; adding a pipeline later would change
-nothing about what it runs.
+`npm run verify` is the gate. GitHub Actions runs the same command, inside the
+repository Dev Container, on each push to `master`; it installs dependencies and
+Chromium first.
 
 It ends with the design-claim report in its `--summary` form — the by-phase tally
 only, since a hundred lines of per-claim listing would bury the gate's own output.

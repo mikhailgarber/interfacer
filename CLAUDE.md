@@ -45,8 +45,9 @@ documents is a script nobody runs.
 npm run verify    # build -> typecheck -> lint -> format:check -> test
 ```
 
-There is no CI, by choice. `verify` is the whole gate, and it must be green before any
-work is presented as done.
+GitHub Actions runs `npm run verify` on each push to `master`, inside this repository's
+Dev Container. `verify` is the whole gate, and it must be green before any work is
+presented as done.
 
 **Build before test.** Tests import `@interfacer/dsl` and `@interfacer/fixtures`
 through the workspace symlink and each package's `exports` map into `dist/` — the same

@@ -196,6 +196,9 @@ repository's development container:
 ./dev.sh npm run verify
 ```
 
+GitHub Actions runs the same setup and `npm run verify` inside the repository's Dev
+Container on each push to `master`.
+
 `npm run verify` is the gate. See [docs/testing.md](docs/testing.md) for the tiers
 and how to run them individually.
 

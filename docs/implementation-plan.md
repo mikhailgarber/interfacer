@@ -78,8 +78,8 @@ free (unit, fixtures, integration); the agent-loop and e2e tiers are invoked
 explicitly, because one is slow and the other costs money. `npm run verify` is the
 single gate — build, typecheck, lint, format, test.
 
-No CI. The gate is a local command, and adding a pipeline around it later changes
-nothing about what it runs.
+GitHub Actions runs the gate inside the repository Dev Container on each push to
+`master`, after installing the locked dependencies and Chromium.
 
 **Confirmed by:** `npm run verify` green from a clean checkout (`npm ci` onward), and
 one smoke test per tier so that no tier can pass by matching zero files.
