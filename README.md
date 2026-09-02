@@ -173,6 +173,8 @@ exists.
 
 ## working on it
 
+(preferred: from inside VSC devcontainer, may work without devcontainer as well)
+
 ```sh
 npm ci
 npm run setup:browsers    # Chromium, for the integration tier and above
@@ -182,6 +184,16 @@ npm run coverage          # the tiers verify runs, with a line-coverage report
 npm run claims            # which of the design's claims the suite verifies, in full
 npm run fixtures          # start the fixture apps and print their URLs
 npm run watch             # keep dist/ current while editing (the editor reads it)
+```
+
+To use devcontainer without VSC, from a host machine, can run the same commands through `./dev.sh`; it asks before
+globally installing `@devcontainers/cli` if needed, then creates or reuses the
+repository's development container:
+
+```sh
+./dev.sh npm ci
+./dev.sh npm run setup:browsers
+./dev.sh npm run verify
 ```
 
 `npm run verify` is the gate. See [docs/testing.md](docs/testing.md) for the tiers

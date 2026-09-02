@@ -312,11 +312,18 @@ wearing a different hat.
 
 ## running it
 
+(preferred: from inside VSC devcontainer, may work without devcontainer as well)
+
 ```sh
 npm ci
 npm run setup:browsers    # Chromium, for the integration tier and above
 npm run verify            # build -> typecheck -> lint -> format:check -> test -> claims
 ```
+
+To use devcontainer without VSC, prefix a command with `./dev.sh`, for example
+`./dev.sh npm run verify`. The wrapper prompts to install `@devcontainers/cli` when
+it is absent, starts or reuses the container configured in `.devcontainer/`, and runs
+the command in the repository workspace.
 
 `npm run verify` is the gate. There is no CI; adding a pipeline later would change
 nothing about what it runs.
