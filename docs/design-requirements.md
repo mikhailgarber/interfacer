@@ -719,9 +719,9 @@ This applies to more than screenshots. Traces embed DOM and network bodies, and 
 
 Evidence is exactly one thing: an append-only **run record**, one per run.<sup>[c](testing.md#design-claim-coverage "claim: record.one-append-only-log — phase 3")</sup> Screenshots and DOM snapshots are attachments on an entry, not a second artifact — there is no separate trace, log, or transcript to correlate against.
 
-Both phases produce the same record. Discovery adds entry kinds replay has no use for, but the format is one format<sup>[c](testing.md#design-claim-coverage "claim: record.same-format-both-phases — phase 1")</sup>, so a run that was recorded and a run that replayed are read side by side.
+Discovery and replay produce the same record, and the interview writes into it too — one file for a session, whatever part of it produced an entry.<sup>[c](testing.md#design-claim-coverage "claim: record.same-format-both-phases — phase 1")</sup> Each adds entry kinds the others have no use for, but the format is one format, so a run that was recorded and a run that replayed are read side by side. The interview drives nothing — there is no browser and no flow yet — so it contributes no step, navigation or attachment; what it contributes is the account of how the contract those steps answer to was settled.
 
-Every entry carries the same envelope — run id, capability id, capability version from `package.json`, phase, step id, timestamp<sup>[c](testing.md#design-claim-coverage "claim: record.common-envelope — phase 3")</sup> — and then a kind:
+Every entry carries the same envelope — run id, capability id, capability version from `package.json`, phase, step id, timestamp<sup>[c](testing.md#design-claim-coverage "claim: record.common-envelope — phase 3")</sup> — and then a kind. One field relaxes: an interview entry carries no capability version, because the interview precedes the project whose `package.json` would supply it.<sup>[c](testing.md#design-claim-coverage "claim: record.interview-has-no-version — phase 9")</sup> Every other field is known before the first question: the capability id comes from the project name the run was invoked with.
 
 | kind | carries |
 | --- | --- |
@@ -734,10 +734,14 @@ Every entry carries the same envelope — run id, capability id, capability vers
 | `pause` / `resume` | reason, which resolver answered, how long it waited |
 | `control.transferred` / `control.returned` | who took the session, for how long, and the state before and after |
 | `effect.performed` | the declared dimension the step carries, and the approval entry that authorized it<sup>[c](testing.md#design-claim-coverage "claim: record.effect-links-its-approval — phase 5")</sup> |
-| `model.turn` | discovery only: the model's stated reason for the step, the tool it called, and what the turn cost |
+| `model.turn` | discovery and the interview: the model's stated reason for the step, the tool it called, and what the turn cost |
+| `answer.recorded` | interview only: which contract fields a turn settled, and the authority that admitted them — a person, or a sentence quoted from the interview file |
+| `proposal.put` | interview only: the guardrail Interfacer proposed, and whether it was accepted |
 | `error` | category, what was expected, what was observed |
 
 `model.turn` is what makes the record answer "what did the agent do **and why**" rather than only what it did. It is also the reason discovery and replay records differ in length rather than in kind.
+
+The interview records what was decided and on whose authority, never what was said.<sup>[c](testing.md#design-claim-coverage "claim: record.interview-records-decisions-not-prose — phase 9")</sup> Every piece of content the record writes elsewhere passes through a policy: `dataClasses` decides whether a screenshot is masked, whether a snapshot keeps its values, whether a URL is redacted. The interview is the phase that has not yet declared what data it may handle — `dataClasses` is one of the things it settles — so writing a person's answers there would be the one place content is recorded under no policy at all. It would also record the wrong thing. What makes a guardrail auditable is that the allowlist was accepted by a person at a known point in the session, not the sentence they typed; and the answers themselves are not lost, since the settled contract is emitted as source into the project. So an `answer.recorded` names the fields a turn settled and the authority behind them, and a `proposal.put` names the guardrail and whether it was accepted — the trail that turns "a human authored the guardrails" from a claim into something a reader can check afterwards.
 
 #### attachments
 

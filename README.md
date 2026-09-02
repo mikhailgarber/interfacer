@@ -98,7 +98,12 @@ exists.
   there. That holds for a phase that fails *after* discovery too: provoking an outcome
   or reading the pages can throw, and the flow already proved is still written out.
 - **It leaves evidence where you point it.** `--record` sends the run record to a file
-  or the other stream; `--attachments <dir>` writes the screenshot and DOM snapshot a
+  or the other stream — one file for the whole session, so how the contract was settled
+  sits beside what was driven against it. The interview writes what it *decided* and on
+  whose authority, never what was said: it is the phase that has not yet declared what
+  data it may handle, so recording a person's answers there would be the one content
+  written under no policy at all. Its entries carry no capability version, because no
+  project exists yet to have one. `--attachments <dir>` writes the screenshot and DOM snapshot a
   hard failure, a handover, the point of no return, or an outcome that was reached but
   not detected triggers, into a directory per run.
   Both are off by default, and what may be captured is still what the contract declared.

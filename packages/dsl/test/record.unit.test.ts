@@ -237,3 +237,36 @@ describe('both phases produce the same format', () => {
     expect(replay.phase).toBe('replay');
   });
 });
+
+// @covers record.interview-has-no-version
+describe('an interview entry', () => {
+  it('carries no capability version, because no project exists to have one', () => {
+    // The interview settles the contract the project will be built from, so the
+    // `package.json` whose version the envelope would carry does not exist yet.
+    // Everything else is known before the first question.
+    const { capabilityVersion: _omitted, ...withoutVersion } = CONTEXT;
+    const entry = createEntryFactory(
+      { ...withoutVersion, phase: 'interview' },
+      { now: fixedClock('2026-03-14T10:00:00.000Z') },
+    ).entry({ kind: 'proposal.put', field: 'allowlist', accepted: true });
+
+    expect(entry).toMatchObject({
+      runId: 'run_01HQ',
+      capabilityId: 'checkAccountBalance',
+      phase: 'interview',
+      seq: 0,
+    });
+    // Absent, not empty and not a placeholder: a version nobody assigned would
+    // read as one somebody did.
+    expect('capabilityVersion' in entry).toBe(false);
+  });
+
+  it('still carries a version when a rerun has a project to take one from', () => {
+    const entry = createEntryFactory(
+      { ...CONTEXT, phase: 'interview' },
+      { now: fixedClock('2026-03-14T10:00:00.000Z') },
+    ).entry({ kind: 'answer.recorded', fields: ['task'], authority: 'human' });
+
+    expect(entry.capabilityVersion).toBe('1.4.0');
+  });
+});

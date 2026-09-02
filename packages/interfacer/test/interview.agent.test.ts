@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { Usage } from '@interfacer/dsl';
+import type { Entry, Usage } from '@interfacer/dsl';
 import {
   generateProject,
   interview,
@@ -433,5 +433,57 @@ describe('a turn that calls no tool, mid-interview', () => {
 
     const said = (seen.at(-1)?.transcript ?? []).filter((one) => one.kind === 'nudge');
     expect(said).toHaveLength(1);
+  });
+});
+
+// @covers record.interview-records-decisions-not-prose
+describe('what the interview writes into the run record', () => {
+  it('records the fields settled and the authority behind them, never the prose', async () => {
+    const entries: Entry[] = [];
+    const { converse } = script(
+      turn(
+        { name: 'record', input: ORDINARY },
+        {
+          name: 'record',
+          input: {
+            allowlist: ['mybank.invalid', 'auth.mybank.invalid'],
+            effects: { securityEffect: 'none' },
+            budgetUsd: 4,
+            citation: 'may visit mybank.invalid and auth.mybank.invalid',
+          },
+        },
+      ),
+      turn({ name: 'settled', input: {} }),
+    );
+
+    const result = await interview({
+      converse,
+      file: FILE,
+      capabilityId: 'checkAccountBalance',
+      record: (entry) => entries.push(entry),
+    });
+
+    expect(result.ending).toBe('settled');
+
+    // The phase is stamped, and no project exists yet to have a version.
+    expect(entries.every((entry) => entry.phase === 'interview')).toBe(true);
+    expect(entries.every((entry) => !('capabilityVersion' in entry))).toBe(true);
+
+    // What was decided, and what admitted it.
+    const recorded = entries.filter((entry) => entry.kind === 'answer.recorded');
+    expect(recorded.length).toBeGreaterThan(0);
+    expect(recorded.every((entry) => entry.authority === 'file')).toBe(true);
+    expect(recorded.flatMap((entry) => entry.fields)).toContain('allowlist');
+
+    // The cost and the turns are there, which is what makes a refusal visible.
+    expect(entries.some((entry) => entry.kind === 'model.turn')).toBe(true);
+    expect(entries.some((entry) => entry.kind === 'run.finished')).toBe(true);
+
+    // And none of the prose: not the file that authorized it, not the task the
+    // person described, not a question or an answer.
+    const written = entries.map((entry) => JSON.stringify(entry)).join('\n');
+    expect(written).not.toContain('mybank and read the balance');
+    expect(written).not.toContain('may visit mybank.invalid');
+    expect(written).not.toContain(ORDINARY.task);
   });
 });

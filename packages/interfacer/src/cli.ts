@@ -177,6 +177,13 @@ async function main(argv: readonly string[], env: NodeJS.ProcessEnv): Promise<nu
       // A rerun only where a project was actually there: the capability id a new
       // directory name proposes is not a delta from anything.
       rerun: location.state === 'occupied',
+      // Into the same record the rest of the session writes: one file for one
+      // session, so how the contract was settled sits beside what was driven
+      // against it. Absent means the interview is silent — the record's default
+      // is stdout, and the conversation is on stderr, so a default here would
+      // interleave entries with the questions somebody is answering.
+      ...(asked.record === undefined ? {} : { destination: asked.record }),
+      ...(proposed === undefined ? {} : { capabilityId: proposed }),
     });
 
     if (result.contract === undefined) {

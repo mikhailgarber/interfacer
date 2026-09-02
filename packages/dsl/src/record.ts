@@ -21,14 +21,28 @@ import type { Usage } from './cost.js';
 import type { DataClass } from './effects.js';
 import type { Strategy } from './target.js';
 
-export type Phase = 'discovery' | 'replay';
+/**
+ * Which part of a session an entry came from.
+ *
+ * The interview drives nothing — there is no browser and no flow yet — so it
+ * contributes no step, navigation or attachment. What it contributes is the
+ * account of how the contract those steps answer to was settled.
+ */
+export type Phase = 'discovery' | 'replay' | 'interview';
 
 /** What every entry in one run carries in common. */
 export interface RunContext {
   readonly runId: string;
   readonly capabilityId: string;
-  /** The `package.json` version. One project is one capability. */
-  readonly capabilityVersion: string;
+  /**
+   * The `package.json` version. One project is one capability.
+   *
+   * Absent only in the interview, which precedes the project whose
+   * `package.json` would supply it — and absent rather than blank, because a
+   * version nobody assigned would read as one somebody did. A rerun against an
+   * existing project has one, and carries it.
+   */
+  readonly capabilityVersion?: string;
   readonly phase: Phase;
 }
 
@@ -134,6 +148,29 @@ export type EntryBody =
     }
   | { readonly kind: 'checkpoint'; readonly satisfied: boolean }
   | { readonly kind: 'outcome.matched'; readonly detectorIndex: number; readonly status: string }
+  /**
+   * What a turn of the interview settled, and what admitted it.
+   *
+   * The fields, never the prose. Content everywhere else in this record passes
+   * through `dataClasses`, and the interview is the phase that has not yet
+   * declared what data it may handle — so a person's answers would be the one
+   * thing written under no policy at all. They are not lost either way: the
+   * settled contract is emitted as source into the project.
+   */
+  | {
+      readonly kind: 'answer.recorded';
+      readonly fields: readonly string[];
+      /** A person in the session, or a sentence quoted from the interview file. */
+      readonly authority: 'human' | 'file';
+    }
+  /**
+   * A guardrail Interfacer proposed, and whether it was accepted.
+   *
+   * What makes "a human authored the guardrails" checkable after the fact: not
+   * the sentence somebody typed, but that the allowlist was accepted by a
+   * person at a known point in the session.
+   */
+  | { readonly kind: 'proposal.put'; readonly field: string; readonly accepted: boolean }
   /**
    * A declared outcome whose state was reached, but which nothing detected.
    *
@@ -244,7 +281,9 @@ export function createEntryFactory(
       const envelope: Envelope = {
         runId: context.runId,
         capabilityId: context.capabilityId,
-        capabilityVersion: context.capabilityVersion,
+        ...(context.capabilityVersion === undefined
+          ? {}
+          : { capabilityVersion: context.capabilityVersion }),
         phase: context.phase,
         seq: seq++,
         timestamp: now().toISOString(),
