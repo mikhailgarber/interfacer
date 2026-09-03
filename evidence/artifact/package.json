@@ -1,0 +1,31 @@
+{
+  "name": "balance-lookup",
+  "version": "0.1.0",
+  "description": "Signs in to the Meridian Bank back-office app and looks up a customer account by its account number, returning that account's current balance.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "balance-lookup": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "mcp": "node dist/mcp.js"
+  },
+  "engines": {
+    "node": ">=22.11"
+  },
+  "dependencies": {
+    "@interfacer/dsl": "file:./vendor/interfacer-dsl"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "typescript": "~6.0.0"
+  }
+}

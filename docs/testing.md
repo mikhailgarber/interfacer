@@ -327,9 +327,11 @@ from its own `package.json`, including the `tsc` that compiles it.
 The cost is that this one test does a real install: `typescript`, `@types/node` and
 Playwright, so it needs the network, and the first run pays for the download. It is
 also why the suite needs nothing ignored — no test writes a generated file into the
-repo. The one ignored path, `scratch/` at the root, is for the other case: a *manual*
-run pointed at `--root scratch`, so a person can read what Interfacer just wrote
-without it becoming a diff.
+repo. Two paths are ignored for a different reason: `scratch/` at the root (a *manual*
+run pointed at `--root scratch`, git-ignored so a person can read what Interfacer
+wrote without it becoming a diff), and `evidence/` (a committed copy of one live run
+— lint- and format-ignored, since generated source and DOM snapshots are not held to
+this repo's style).
 
 **Fixture servers are started per test file, on ephemeral ports**, in a `beforeAll`
 and closed in an `afterAll`. Not a `globalSetup`: files run in parallel workers, and

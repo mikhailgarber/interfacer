@@ -1,0 +1,6 @@
+CheckpointFailed: pressButton:role=button name="Sign in": locator.click: Timeout 3000ms exceeded.
+  run:      run_mtlq6x9ldwx9ce
+  step:     pressButton:role=button name="Sign in"
+  expected: role=button name="Sign in" | css="button[type='submit']"
+  observed: locator.click: Timeout 3000ms exceeded.
+  evidence: attachments/run_mtlq6x9ldwx9ce/

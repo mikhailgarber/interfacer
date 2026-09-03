@@ -1,0 +1,6 @@
+usage: balance-lookup [options]
+
+  --url <text>  # entry point
+  --account-number <text>  # The customer account number to look up, e.g. ACC-1001.
+  --username <text>  # Username to sign in to the Meridian Bank back-office app with; teller1.
+  from PASSWORD or the keyboard — never on the command line  # Password for the sign-in user.

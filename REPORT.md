@@ -160,9 +160,11 @@ every arm and catches `ReplayError` has handled everything. Returning outcomes r
 than throwing them matters most at the MCP boundary, where an exception becomes an
 opaque tool error and the calling agent can no longer tell "does not exist" from "is
 broken". UI drift is not a separate category — rare against a stable application, it
-surfaces as recorded drift or a hard failure. `evidence/` has a replay returning
-`permission_denied`, one hard-failing on an injected fault, and a discovery-time
-outcome reached but not detected.
+surfaces as recorded drift or a hard failure. `evidence/` has replays covering all
+three endings, including two hard failures and one case where a too-broad outcome
+detector swallows a bad-credentials failure into a business outcome — a
+detector-quality problem a human reviewer catches before approving the artifact, and
+the reason discovery reports an unverified outcome rather than guessing one.
 
 ## 4. Heterogeneity & multi-tenant
 

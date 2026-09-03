@@ -6,8 +6,9 @@ import tseslint from 'typescript-eslint';
 export default defineConfig(
   // `scratch/` holds the projects a manual run writes. Generated code is
   // emitted to the capability template's posture, not this repo's, so linting
-  // it turns the gate red the moment anyone does a live run.
-  globalIgnores(['**/dist/**', '**/node_modules/**', 'coverage/**', 'scratch/**']),
+  // it turns the gate red the moment anyone does a live run. `evidence/` holds a
+  // committed copy of one such run — same reason.
+  globalIgnores(['**/dist/**', '**/node_modules/**', 'coverage/**', 'scratch/**', 'evidence/**']),
 
   {
     files: ['**/*.ts', '**/*.js'],

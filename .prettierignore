@@ -14,3 +14,7 @@ REPORT.md
 # Pre-existing config this repo did not author.
 .devcontainer/
 .github/dependabot.yml
+
+# Captured run records, DOM snapshots and generated source — data, not code we
+# hold to the repo's style.
+evidence/

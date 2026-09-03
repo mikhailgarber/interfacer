@@ -1,0 +1,6 @@
+SurfaceUnavailable: open: could not reach http://127.0.0.1:4099/
+  run:      run_mtlq6wv8m9ewrc
+  step:     open
+  expected: a page at http://127.0.0.1:4099/
+  observed: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:4099/
+  evidence: (none written — the connection failed before a page existed)
