@@ -7,6 +7,13 @@ The shape follows the design's testing section: almost everything Interfacer
 claims is testable without a model, and most of it without a browser, so the
 tiers are ordered by what they are permitted to reach for.
 
+One mechanism deserves a pointer up front. The design document is also the test
+registry: a statement in [design-requirements.md](design-requirements.md) that a
+test could falsify carries an inline marker naming a claim, and tests tag
+themselves with `@covers <id>`. `npm run claims` joins the two and reports which
+of the design's claims the suite actually verifies. If you are auditing what is
+proved rather than how, start at **design-claim coverage** near the end.
+
 ## the tiers
 
 | tier          | browser | app     | model    | invoked by  |
