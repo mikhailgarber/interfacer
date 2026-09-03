@@ -2,7 +2,7 @@
   "name": "@interfacer/dsl",
   "version": "0.0.0",
   "description": "Step vocabulary, Target, contract declarations, Secret, and the execution engine. The only runtime dependency a generated capability has.",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

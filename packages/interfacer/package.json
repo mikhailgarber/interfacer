@@ -2,7 +2,7 @@
   "name": "interfacer",
   "version": "0.0.0",
   "description": "The CLI and agent: interview, agent loop, generation. It writes capability projects.",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

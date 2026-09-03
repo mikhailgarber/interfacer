@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Real HTTP applications served from the repo, differing in how hostile they are. Every tier above unit is proved against these rather than against a public site.",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
