@@ -22,7 +22,6 @@
     "packages/*/test/**/*.ts",
     "fixtures/src/**/*.ts",
     "fixtures/test/**/*.ts",
-    "e2e/test/**/*.ts",
     "*.config.ts"
   ]
 }

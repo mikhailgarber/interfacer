@@ -10,8 +10,7 @@
   },
   "workspaces": [
     "packages/*",
-    "fixtures",
-    "e2e"
+    "fixtures"
   ],
   "scripts": {
     "build": "tsc --build tsconfig.build.json",
@@ -26,7 +25,6 @@
     "test:fixtures": "vitest run --project fixtures",
     "test:integration": "vitest run --project integration",
     "test:agent": "vitest run --project agent",
-    "test:e2e": "vitest run --project e2e",
     "claims": "node test/claims.ts",
     "coverage": "vitest run --project unit --project fixtures --project integration --project agent --coverage",
     "fixtures": "npm run build --silent && node fixtures/dist/serve.js",

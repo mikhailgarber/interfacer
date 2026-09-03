@@ -62,20 +62,20 @@ in-memory `Map<sessionId, ParkedRun>` beside the browser, TTL-bounded, single-sh
 
 **Testing philosophy.** Prefer fakes to mocks (mock-heavy suites pressure you to
 reintroduce the rejected abstractions); integration tests drive the engine
-(hand-authored `Flow` + `.run()`), never `page.click()`. Five tiers: unit (no
+(hand-authored `Flow` + `.run()`), never `page.click()`. Four tiers: unit (no
 browser) → fixtures (real in-repo HTTP apps) → integration (real browser, real
-fixture, no model) → agent-loop (real browser, scripted `decide`) → e2e (live model,
-pre-release only).
+fixture, no model) → agent-loop (real browser, scripted `decide`). A live model
+driving discovery end to end has no tier — it is validated by hand as sanity runs,
+recorded in `evidence/`; see `docs/testing.md`.
 
 ---
 
 ## Phase 0 — Monorepo & toolchain
 
-**Build:** workspace with `packages/dsl`, `packages/interfacer`, `fixtures/`, `e2e/`.
-TypeScript strict, one test runner, lint, Playwright browsers. The five test tiers are
-separate runner projects: `npm test` runs the three that are fast, deterministic and
-free (unit, fixtures, integration); the agent-loop and e2e tiers are invoked
-explicitly, because one is slow and the other costs money. `npm run verify` is the
+**Build:** workspace with `packages/dsl`, `packages/interfacer`, `fixtures/`.
+TypeScript strict, one test runner, lint, Playwright browsers. The four test tiers are
+separate runner projects, and `npm test` runs all of them — every tier is
+deterministic and free once the browsers are installed. `npm run verify` is the
 single gate — build, typecheck, lint, format, test.
 
 GitHub Actions runs the gate inside the repository Dev Container on each push to
@@ -303,10 +303,11 @@ every declared outcome, rewrite `variant`. Interactive end-of-run cost report.
 - **agent-loop tier (fake model):** partial-flow written on stall / budget; live
   values appear in neither the emitted project nor the record; unverified-outcome
   reporting; seeded discovery keeps resolving steps and re-discovers broken ones.
-- **e2e tier (live model, real fixture, pre-release / on demand):** discovery reaches
-  the goal → emits a project that compiles → that project replays with no model (the
-  whole-system through-line); a declared outcome provoked during discovery has its
-  detector recorded, not reported unverified.
+- **sanity runs (live model, real fixture, by hand — recorded in `evidence/`):**
+  discovery reaches the goal → emits a project that compiles → that project replays
+  with no model (the whole-system through-line); a declared outcome provoked during
+  discovery has its detector recorded, not reported unverified. See
+  `docs/testing.md`, *live-model validation*.
 
 ---
 
@@ -315,9 +316,10 @@ every declared outcome, rewrite `variant`. Interactive end-of-run cost report.
 - **Phases 1–5 are the spine** and are almost entirely testable without a model and
   mostly without a browser. If effort is constrained, this is the part that must be
   solid — everything else is callers of it.
-- **Phase 2 (fixtures) gates Phases 3–10.** It is unglamorous but every integration,
-  agent-loop, and e2e test depends on it. Build `clean` and `hostile` fully before
-  Phase 3 and add `rebranded` / `skewed` when Phases 3 / 10 need them.
+- **Phase 2 (fixtures) gates Phases 3–10.** It is unglamorous but every integration
+  and agent-loop test depends on it, and so does every sanity run. Build `clean` and
+  `hostile` fully before Phase 3 and add `rebranded` / `skewed` when Phases 3 / 10
+  need them.
 - **The `decide(state, tools)` seam (Phase 8) does double duty** — provider
   portability and the fake-model injection point — so no test-only abstraction is
   introduced.

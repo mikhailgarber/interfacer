@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 import { includeGlobs, typecheckGlobs } from './test/tiers.js';
 
 /**
- * One runner, five tiers.
+ * One runner, four tiers.
  *
  * A test's tier is its filename suffix, not its directory, because the tiers cut
  * across packages: `@interfacer/dsl` has unit and integration tests, `interfacer`
@@ -11,19 +11,18 @@ import { includeGlobs, typecheckGlobs } from './test/tiers.js';
  * The tier list and the roots live in `test/tiers.ts`, which `test/suite.unit.test.ts`
  * also reads to prove no test file falls outside them.
  *
- * | project       | browser | app     | model    | invoked by           |
- * | ------------- | ------- | ------- | -------- | -------------------- |
- * | `unit`        | no      | no      | no       | `npm test`           |
- * | `fixtures`    | no      | HTTP    | no       | `npm test`           |
- * | `integration` | yes     | fixture | no       | `npm test`           |
- * | `agent`       | yes     | fixture | scripted | `npm test`           |
- * | `e2e`         | yes     | fixture | live     | `npm run test:e2e`   |
+ * | project       | browser | app     | model    | invoked by  |
+ * | ------------- | ------- | ------- | -------- | ----------- |
+ * | `unit`        | no      | no      | no       | `npm test`  |
+ * | `fixtures`    | no      | HTTP    | no       | `npm test`  |
+ * | `integration` | yes     | fixture | no       | `npm test`  |
+ * | `agent`       | yes     | fixture | scripted | `npm test`  |
  *
- * `npm test` runs the first four — every tier with no live model. What keeps a
- * tier out of the gate is a model in the loop, not a browser or a fixture: a
- * scripted `decide` is deterministic and free, so the agent tier gates like any
- * other. Only `e2e` is invoked explicitly, because it is slow, non-deterministic
- * and costs money.
+ * `npm test` runs all four — every tier gates. What would keep a tier out of the
+ * gate is a live model in the loop, not a browser or a fixture: a scripted
+ * `decide` is deterministic and free, so the agent tier gates like any other.
+ * There is no live-model tier; that validation is done by hand — see
+ * `docs/testing.md`, "live-model validation".
  *
  * What this file does *not* describe is written down in `docs/testing.md`:
  * tests import from `dist`, so a build has to precede them, and the fixture
@@ -114,14 +113,6 @@ export default defineConfig({
           include: includeGlobs('agent'),
           testTimeout: 120_000,
           hookTimeout: 120_000,
-        },
-      },
-      {
-        test: {
-          name: 'e2e',
-          include: includeGlobs('e2e'),
-          testTimeout: 900_000,
-          hookTimeout: 900_000,
         },
       },
     ],

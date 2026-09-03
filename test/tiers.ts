@@ -9,7 +9,7 @@
  */
 
 /** Ordered cheapest-first, which is also the order they are worth running in. */
-export const TIERS = ['unit', 'fixtures', 'integration', 'agent', 'e2e'] as const;
+export const TIERS = ['unit', 'fixtures', 'integration', 'agent'] as const;
 
 export type Tier = (typeof TIERS)[number];
 
@@ -22,7 +22,7 @@ export type Tier = (typeof TIERS)[number];
  * tying a tier to a directory would fight the layout and, worse, would silently
  * drop a correctly-named test filed in the "wrong" place.
  */
-export const TEST_ROOTS = ['test', 'packages/*/test', 'fixtures/test', 'e2e/test'] as const;
+export const TEST_ROOTS = ['test', 'packages/*/test', 'fixtures/test'] as const;
 
 /** Runtime test files for one tier, as globs relative to the repo root. */
 export function includeGlobs(tier: Tier): string[] {

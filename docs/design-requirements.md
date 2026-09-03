@@ -887,11 +887,11 @@ It is also the only practical way to test pathological behaviour, because a live
 
 The `decide(state, tools)` seam pays for itself twice here — it exists for provider portability, and it happens to be exactly where a fake belongs, so no testing-only abstraction is introduced. It stays a fake only while tests assert on outcomes; a test asserting that `decide` was called twice with particular arguments is a mock wearing a fake's clothes.
 
-### end to end
+### live-model validation
 
-Real browser, real fixture, **live model**. Discovery reaches the goal, emits a project that compiles, and that project replays without a model — which is the through-line, and the only test that exercises the whole system. Also: a declared outcome is provoked during discovery and a detector recorded rather than reported unverified.
+The last step of the through-line — a **live** model driving discovery, emitting a project that compiles, that then replays with no model — has no tier. A live model is slow, costs money per run, and is non-deterministic in the dimension the rest of the suite exists to exclude; its failures are findings a person reads, not builds a job bisects. It is validated by hand instead, as **sanity runs**: the real CLI, driven by a real model, against the fixtures and occasionally a real public site, repeated when the agent loop or the discovery and interview prompts change.
 
-These are slow, non-deterministic and cost money, so they run before a release or on demand, never on every commit.
+These runs are themselves AI-assisted — the operator drives the CLI, reads the run records and turns findings into fixes through a coding agent. The downstream half — install, compile, drive the generated project — is gated on every commit against a hand-authored flow; a sanity run adds that the same path works on a flow a live model wrote. Findings return as fixes with regression tests, or as open questions in `testing.md`. One run is kept end to end in `evidence/`.
 
 ## non-goals
 

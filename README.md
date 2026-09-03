@@ -17,7 +17,7 @@ no model in the loop.
   shaped the way it is. The authority; everything else follows from it.
 - [Implementation plan](docs/implementation-plan.md) — the ordered build, in
   phases, each closed by a test tier.
-- [Testing](docs/testing.md) — the five tiers, where tests live, what the runner
+- [Testing](docs/testing.md) — the four tiers, where tests live, what the runner
   config decides, and what it deliberately leaves open.
 - [CLAUDE.md](CLAUDE.md) — conventions for working in this repo: which doc is the
   authority, the gate, and the rule that the docs above stay true.
@@ -29,7 +29,6 @@ no model in the loop.
 | `packages/dsl` | `@interfacer/dsl` — step vocabulary, `Target`, contract declarations, `Secret`, the execution engine, pause/resume, the evidence rules, and the effects a run refuses. The only runtime dependency a generated capability has. |
 | `packages/interfacer` | `interfacer` — the CLI and agent: the interview that settles a contract, the discovery loop that finds the flow, and the generator that writes the project. |
 | `fixtures` | Five real HTTP applications served from the repo — `clean`, `legacy`, `hostile`, `rebranded`, `skewed` — differing in how hostile they are. Everything above the unit tier is proved against these rather than a public site. `npm run fixtures` starts them for a person to look at. |
-| `e2e` | The live-model tier. Tests only. |
 
 Dependencies run one way. The DSL package knows nothing about Interfacer, the agent
 loop, or any model, so a capability in production never loads an SDK and never needs
@@ -37,17 +36,17 @@ an API key.
 
 ## status
 
-Phase 10 of the implementation plan — the last of them, and complete apart from the
-live-model test tier, which is a deliberate stop rather than an omission. **A capability
+**A capability
 can be commissioned in a conversation, discovered by a model driving the application,
 written out as a complete Node project that builds and runs with nothing added, and
 replayed from then on with no model in the loop — stopping to ask a human without losing
 its place, bounded in what it may write down about what it saw, and refused where its
 own declaration says it needs a human it never asks.**
 
-Not built: the live-model tier. Everything below is proved against real browsers and
-real applications with a *scripted* model, which is a deliberate stop before spending
-money on a live one. [docs/testing.md](docs/testing.md) records the shape it will take.
+The automated suite proves all of this against real browsers and real applications
+with a *scripted* model. A live model driving discovery end to end is validated by
+hand instead — see [docs/testing.md](docs/testing.md), "live-model validation" —
+and one such run is kept in [`evidence/`](evidence/).
 
 Why any of it is the way it is belongs to the
 [design requirements](docs/design-requirements.md), and the order it was built in to

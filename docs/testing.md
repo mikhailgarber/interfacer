@@ -9,23 +9,23 @@ tiers are ordered by what they are permitted to reach for.
 
 ## the tiers
 
-| tier          | browser | app     | model    | invoked by           |
-| ------------- | ------- | ------- | -------- | -------------------- |
-| `unit`        | no      | no      | no       | `npm test`           |
-| `fixtures`    | no      | HTTP    | no       | `npm test`           |
-| `integration` | yes     | fixture | no       | `npm test`           |
-| `agent`       | yes     | fixture | scripted | `npm test`           |
-| `e2e`         | yes     | fixture | live     | `npm run test:e2e`   |
+| tier          | browser | app     | model    | invoked by  |
+| ------------- | ------- | ------- | -------- | ----------- |
+| `unit`        | no      | no      | no       | `npm test`  |
+| `fixtures`    | no      | HTTP    | no       | `npm test`  |
+| `integration` | yes     | fixture | no       | `npm test`  |
+| `agent`       | yes     | fixture | scripted | `npm test`  |
 
-`npm test` runs the first four. The columns say what a tier may reach for rather than
+`npm test` runs all four. The columns say what a tier may reach for rather than
 what every test in it uses: the interview tests in the `agent` tier open no browser,
 because the contract is settled before anything is driven.
 
 **What keeps a tier out of the gate is a live model, not a browser or a fixture.** A
 scripted `decide` is as deterministic and as free as a hand-written flow, so the agent
 tier gates on the same terms as `integration` — and it holds fifteen of the design's
-claims, which would otherwise be reported as covered by tests the gate never ran. Only
-`e2e` is invoked explicitly: it is slow, non-deterministic, and it costs money.
+claims, which would otherwise be reported as covered by tests the gate never ran.
+There is no live-model tier: that last step of the through-line is validated by
+hand instead, and **live-model validation** below says how and why.
 
 - **`unit`** — no browser, no app. What is genuinely pure: `Secret` redaction,
   allowlist matching against resolved URLs, cost accounting from `usage`,
@@ -91,13 +91,10 @@ claims, which would otherwise be reported as covered by tests the gate never ran
   `dd` or a `td` has no role and no accessible name, which is why the observation
   carries the identifying attributes of those nodes beside it, and why `clean` is
   only clean for the controls.
-- **`e2e`** — real browser, real fixture, live model. The through-line: discovery
-  reaches the goal, emits a project that compiles, and that project replays with
-  no model attached. Slow, non-deterministic, and it costs money. **Deliberately
-  unwritten so far** — a scaffold test and nothing else, though the shape it will take
-  is settled; see **the live tier** below. Everything the tiers above prove, they prove
-  against real browsers and real applications with a scripted model, which is a stop
-  chosen on purpose before spending money on a live one.
+Everything these tiers prove, they prove against real browsers and real
+applications with a *scripted* model. The one thing they cannot reach — a *live*
+model driving discovery end to end — has no tier of its own; it is validated by
+hand, and **live-model validation** below says how and why.
 
 ## the fixtures
 
@@ -158,92 +155,34 @@ rather than hostile-by-assertion. Later phases inherit it: it is what a person u
 sanity-check a target chain the model proposed, or to see the screen a failing replay
 was looking at.
 
-## the live tier
+## live-model validation
 
-`e2e` means **live**: a test in it requires a real model. That is the only thing
-separating it from `agent`, which gets the same real browser and the same real
-fixture — so a test that passes without a model is an agent test filed in the wrong
-directory, and it belongs inside the gate rather than outside it.
+The last step of the through-line — a **live** model driving discovery, emitting a
+project that compiles, that then replays with no model — has no tier. A live model
+is slow, costs money per run, and is non-deterministic in the dimension the rest of
+the suite exists to exclude; its failures are findings a person reads, not builds a
+CI job bisects. So it is validated by hand, as **sanity runs**.
 
-A requirement rather than a preference, which settles how a missing key is handled:
-`credentials(process.env)` runs in `beforeAll` and its `MissingCredential` fails the
-tier. Not `it.runIf(API_KEY)` — a test that skips when the key is absent does not
-require a model, and a tier reporting green having run nothing is the one failure
-mode a suite cannot catch by testing harder. Failing loudly costs nothing here:
-`npm test` never invokes this tier, so the only person who sees it is the one who
-typed `npm run test:e2e`.
+The downstream half is already covered on every commit:
+`generate.integration.test.ts` installs, compiles and drives a generated project —
+CLI, master function and MCP server — against the `clean` fixture, from a flow
+written by hand. A sanity run adds that the same path works on a flow a live model
+actually wrote.
 
-**None of this is written yet.** What follows is the shape it takes, recorded so the
-tier is not argued from scratch again when it is.
+A sanity run is `npx interfacer` against the fixtures, and occasionally against a
+real public site where the surface is genuinely uncontrolled. These runs are
+themselves AI-assisted: the operator works through a coding agent that launches the
+CLI, answers the questions discovery asks, reads the run records and attachments,
+and turns what it finds into fixes. They are repeated when the agent loop or the
+discovery and interview prompts change.
 
-### two parts, and what crosses between them
+Findings return as fixes with regression tests in the tiers above, or as an entry
+in **not yet decided** below when the fix is a design question.
 
-The through-line has two halves with opposite characters, and the test keeps them
-apart:
-
-- **discovery** — a live model drives the task against a fixture, and a project is
-  written. Non-deterministic, expensive, and its failures want a person to read
-  them: a model that cannot sign in to `clean` is a finding about the observation
-  format or the tool descriptions, not a red build.
-- **the project** — install, compile, call. Fully deterministic once a flow exists,
-  and the half that catches a regression: the balance is `1250.75` or it is not.
-
-What crosses between them is **a directory path and nothing else** — no flow object,
-no transcript, no cost report. The second half does not know a model was involved and
-would work pointed at any generated project, which is why it is the same install,
-compile and drive that `generate.integration.test.ts` already performs against a flow
-written by hand.
-
-Discovery runs in a `beforeAll`, so a bad one reports as a setup failure rather than
-as an assertion and the two stay distinguishable. The cost is that it stops the
-project half from running at all, which is why `generate.integration.test.ts` stays
-exactly as it is: it drives the same downstream path, gates on every commit, and is
-immune to model variance. The live test adds *and it also works on a flow a model
-actually wrote* rather than being the only thing covering it.
-
-### the operator
-
-Something has to answer the questions a discovery run asks, and a live model's
-questions cannot be scripted in advance.
-
-Everything Interfacer itself asks is a fixed string in its own source — the `vendor`
-and `appVersion` proposals, a revised `securityEffect`, the point of no return, the
-budget ceiling — and every one of them is a `confirm`. Those are answered
-deterministically against the known set, so a confirmation that nobody expected fails
-the test rather than being waved through: what Interfacer puts to a human is part of
-its contract.
-
-The `open` questions are the model's own prose, asking for one declared input at a
-time, and three things stop them being answered by matching text. The phrasing is the
-model's and varies from run to run. The input name it states in `for` is consumed by
-the loop and never reaches `Ask`. And the same input means different values at
-different moments — the account reference discovery needs is one that exists, the one
-provocation needs is one that does not, and telling those apart by matching
-`/not exist|no such|missing/` against a sentence a model wrote is precisely the flake
-this tier does not need.
-
-So the operator is a model as well: the same SDK and the same key, in a conversation
-of its own, holding a card of facts — the entry point, the credentials, an account
-that exists and an account that does not — and answering with a value. Three rules
-make that safe rather than circular.
-
-**It can fail the test and it can never pass it.** Told to answer `ABORT` when the
-questions show the tool is lost, it produces a failure, and a false failure costs an
-investigation rather than a false green. Nothing it says decides a success: that is
-settled entirely by the second half, which never sees it.
-
-**It sees only the questions.** Not the accessibility tree, not the discovery
-transcript, not the flow. This is the rule the whole arrangement rests on — a model
-that can see the page will start naming the control to use, and the test stops
-proving that discovery works from the tree alone. Its world is the facts card and
-what it has been asked.
-
-**It is stateful, because a loop is only visible across questions.** Being asked for
-the password a third time is the signal, and a per-question call cannot see it.
-
-That makes it a fake rather than a mock, on the terms of the standing rule above: a
-real function answering the way the person who commissioned the capability would,
-asserted on what the run produced. Nothing counts how often it was called.
+One run is kept end to end in [`evidence/`](../evidence/) — interview and discovery
+records, the generated project, the attachments a failure triggered, and a
+deterministic replay against that project. Producing one needs `API_KEY` and writes
+to the git-ignored `scratch/`; see **running it** below and [README.md](../README.md).
 
 ## the two standing rules
 
@@ -275,16 +214,15 @@ A test's tier is its **filename suffix**, not its directory:
 
 ```
 <name>.unit.test.ts   <name>.fixtures.test.ts   <name>.integration.test.ts
-<name>.agent.test.ts  <name>.e2e.test.ts        <name>.test-d.ts
+<name>.agent.test.ts  <name>.test-d.ts
 ```
 
-Test files live under one of four roots:
+Test files live under one of three roots:
 
 ```
 test/                 repo-wide tests that belong to no single package
 packages/*/test/
 fixtures/test/
-e2e/test/
 ```
 
 Tier and location are independent — any root may hold any tier. The tiers cut
@@ -339,8 +277,7 @@ reason given under *design-claim coverage* below. The guards that do gate — a
 before it.
 
 Individual tiers: `npm run test:unit`, `test:fixtures`, `test:integration`,
-`test:agent`, `test:e2e`. `npm run fixtures` starts the fixture apps for a person to
-look at.
+`test:agent`. `npm run fixtures` starts the fixture apps for a person to look at.
 
 The steps `verify` chains are also runnable alone — `npm run build`, `typecheck`,
 `lint`, `format:check`, `claims` — and `npm run format` writes the formatting that
@@ -411,14 +348,13 @@ Two reports, answering different questions.
 ### line coverage
 
 ```sh
-npm run coverage    # the four free tiers, with a report
+npm run coverage    # every tier, with a report
 ```
 
 Reports land in `coverage/` (gitignored): a terminal summary, a browsable
-`index.html`, and `lcov.info` for tooling. The e2e tier is left out because it
-costs money to run.
+`index.html`, and `lcov.info` for tooling.
 
-Two files are excluded, for the same reason. `fixtures/src/serve.ts` is exercised by
+Two files are excluded, for a shared reason. `fixtures/src/serve.ts` is exercised by
 `serve.fixtures.test.ts` and `packages/interfacer/src/cli.ts` by
 `interview.unit.test.ts`, both of which spawn the file as a child process — v8 coverage
 in this process cannot see another one, so they are tested but unmeasurable from here.
@@ -533,16 +469,16 @@ settled:
   flow completes without entering it and Phase 3 is not forced to decide. It
   becomes a real question the first time a capability needs something that only
   exists inside a frame. *(Phase 3, if then)*
-- **Headed vs headless for `e2e`** — mostly settled. Replay is headless by
-  default; `discover()` is headed by default, so an operator pause hands over a
-  window that is already open, and a generated CLI runs headed where the flow
-  declares one or the effects require an attended session. Phase 6 found the
-  limit: Playwright exposes no way to ask a `Browser` how it was launched, so the
-  check reads the `headless` option and a caller supplying its own browser is
-  taken at its word — which is what the `agent` tier does, since it is testing
-  the loop rather than the window. What a live-model `e2e` run should use, and
-  how a person overrides it locally to watch one, is the part still open, and stays
-  open while the live-model tier does. *(deferred with the `e2e` tier)*
+- **Headed vs headless** — mostly settled. Replay is headless by default;
+  `discover()` is headed by default, so an operator pause hands over a window that
+  is already open, and a generated CLI runs headed where the flow declares one or
+  the effects require an attended session. Phase 6 found the limit: Playwright
+  exposes no way to ask a `Browser` how it was launched, so the check reads the
+  `headless` option and a caller supplying its own browser is taken at its word —
+  which is what the `agent` tier does, since it is testing the loop rather than
+  the window. What a live-model sanity run should use, and how a person overrides
+  it locally to watch one, is the part still open. *(deferred with live-model
+  validation)*
 - **Run-record capture** — the record goes to stdout by default. Phase 3's
   redaction test asserts a secret sentinel appears nowhere in the record, in any
   attachment, or in any thrown error — scanning all output, not checking a field.

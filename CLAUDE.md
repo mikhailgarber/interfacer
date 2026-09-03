@@ -62,12 +62,14 @@ Rebuild, then restart the TypeScript and ESLint servers. Do not "fix" the code f
 
 ## tests
 
-Five tiers; a test's tier is its **filename suffix**, not its directory
+Four tiers; a test's tier is its **filename suffix**, not its directory
 (`*.unit.test.ts`, `*.fixtures.test.ts`, `*.integration.test.ts`, `*.agent.test.ts`,
-`*.e2e.test.ts`, plus `*.test-d.ts` for type-level tests). `test/suite.unit.test.ts`
+plus `*.test-d.ts` for type-level tests). `test/suite.unit.test.ts`
 fails the run if a test file matches no tier — otherwise it would never be collected
-and its assertions would silently never run. Full conventions in
-[docs/testing.md](docs/testing.md).
+and its assertions would silently never run. The last step of the through-line — a
+live model driving discovery end to end — has no tier; it is validated by hand, and
+[docs/testing.md](docs/testing.md)'s *live-model validation* says how. Full
+conventions there too.
 
 Two rules from the design that are easy to violate without noticing:
 
