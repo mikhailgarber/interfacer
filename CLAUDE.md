@@ -94,6 +94,6 @@ twice with particular arguments is a mock wearing a fake's clothes.
   be lost — usually a sentence from the design doc about what a rule protects against.
 - **Placeholders name the phase that deletes them.** A scaffold export or a
   not-implemented stub carries a comment saying which phase replaces it.
-- **Do not reformat the prose docs.** `docs/`, `README.md` and `CLAUDE.md` are
-  Prettier-ignored on purpose: reflow noise buries real edits.
+- **Do not reformat the prose docs.** `docs/`, `README.md`, `REPORT.md` and
+  `CLAUDE.md` are Prettier-ignored on purpose: reflow noise buries real edits.
 - **Nothing is committed unless asked.** Present the work and let the user decide.

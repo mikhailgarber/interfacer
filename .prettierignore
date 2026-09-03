@@ -9,6 +9,7 @@ LICENSE
 docs/
 README.md
 CLAUDE.md
+REPORT.md
 
 # Pre-existing config this repo did not author.
 .devcontainer/
