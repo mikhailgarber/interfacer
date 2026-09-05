@@ -107,6 +107,16 @@ npm ci
 npm run setup:browsers    # Chromium — discovery and the browser tiers need it
 ```
 
+**Discovery opens a headed browser** — on purpose, so a human can watch and take
+over — and a headed launch needs a windowing system to open it in. macOS and
+Windows/WSL2 (via WSLg) supply one for free; a Linux box or container with no
+display does not, and `chromium.launch()` fails with "Missing X server or
+$DISPLAY". This repository's own Dev Container is exactly that: run discovery
+there with a virtual display, e.g. `xvfb-run -a npx interfacer ...` (`xvfb-run`
+is preinstalled). Replay and the test suite are unaffected — replay is headless
+by default, and the test tiers launch Playwright with its own headless default
+rather than discovery's.
+
 Two environment variables, both read from the process environment, never from argv:
 
 - `API_KEY` — an Anthropic API key. **Discovery only.** A generated capability never
