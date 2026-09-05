@@ -74,6 +74,14 @@ function dslRoot(): string {
  * it dropped — `files`, `scripts`, `devDependencies` — and its dependencies kept
  * verbatim, so the project's own install pulls Playwright exactly as an install
  * from a registry would have.
+ *
+ * The DSL pins Playwright to an exact version rather than a range for that reason:
+ * a generated project has no lockfile, so a range would let its `npm install`
+ * silently resolve to whatever Playwright the registry has published *today* —
+ * drifting from the exact build `setup:browsers` downloaded for this repo, and
+ * breaking replay with a missing-executable error unrelated to anything the user
+ * changed. An exact version makes every generated project resolve the one
+ * Playwright build this repo is tested against, no matter when it is installed.
  */
 export async function vendoredDsl(): Promise<ReadonlyMap<string, string>> {
   const root = dslRoot();
